@@ -1,10 +1,9 @@
-
-import os
-import boto3
 import logging
+import os
 
 # until merged https://github.com/boto/boto3/pull/2746
 AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL")
+import boto3
 
 STAGE = os.environ.get("STAGE")
 DYNAMO_TABLE_CACHE = "prod_cache" if STAGE == "prod" else "dev_cache"

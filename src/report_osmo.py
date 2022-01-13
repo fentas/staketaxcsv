@@ -1,4 +1,3 @@
-
 """
 usage: python3 report_osmo.py <walletaddress> [--format all|cointracking|koinly|..]
 
@@ -7,23 +6,21 @@ Prints transactions and writes CSV(s) to _reports/OSMO*.csv
 """
 
 import logging
-import json
-import os
-import pprint
 import math
-import osmo.api_data
+import pprint
 
-from settings_csv import TICKER_OSMO
-from common.Exporter import Exporter
-from common.ErrorCounter import ErrorCounter
-from common.Cache import Cache
-from common import report_util
-from osmo.config_osmo import localconfig
-from osmo.ProgressOsmo import ProgressOsmo, SECONDS_PER_TX
-from osmo.lp_rewards import lp_rewards
-import osmo.processor
 import osmo.api_data
 import osmo.api_tx
+import osmo.processor
+from common import report_util
+from common.Cache import Cache
+from common.ErrorCounter import ErrorCounter
+from common.Exporter import Exporter
+from osmo.config_osmo import localconfig
+from osmo.lp_rewards import lp_rewards
+from osmo.ProgressOsmo import SECONDS_PER_TX, ProgressOsmo
+from settings_csv import TICKER_OSMO
+
 MAX_TRANSACTIONS = 5000
 
 
@@ -73,7 +70,7 @@ def txone(wallet_address, txid):
 
 
 def estimate_duration(wallet_address):
-    return osmo.api_data.get_count_txs(wallet_address) * SECONDS_PER_TX
+    return osmo.api_data.get_count_txs(wallet_address, sleep_seconds=0) * SECONDS_PER_TX
 
 
 def _max_pages():
@@ -85,6 +82,7 @@ def _max_pages():
 
 def txhistory(wallet_address, job=None, options=None):
     exporter = Exporter(wallet_address)
+    progress = ProgressOsmo()
 
     if options:
         _read_options(options)
@@ -96,13 +94,13 @@ def txhistory(wallet_address, job=None, options=None):
         logging.info("Loaded ibc_addresses from cache ...")
 
     # Estimate total time to create CSV
-    progress = ProgressOsmo()
     reward_tokens = osmo.api_data.get_lp_tokens(wallet_address)
     num_txs = min(osmo.api_data.get_count_txs(wallet_address), MAX_TRANSACTIONS)
     progress.set_estimate(num_txs, len(reward_tokens))
+    logging.info("num_txs: %s", num_txs)
 
     # Transactions data
-    _fetch_and_process_txs(wallet_address, exporter, progress)
+    _fetch_and_process_txs(wallet_address, exporter, progress, num_txs)
 
     # LP rewards data
     lp_rewards(wallet_address, reward_tokens, exporter, progress)
@@ -118,10 +116,9 @@ def txhistory(wallet_address, job=None, options=None):
     return exporter
 
 
-def _remove_dups(elems):
+def _remove_dups(elems, txids_seen):
     """ API data has duplicate transaction data.  Clean it. """
     out = []
-    txids_seen = set()
     for elem in elems:
         txid = elem["txhash"]
         if txid in txids_seen:
@@ -130,31 +127,32 @@ def _remove_dups(elems):
         out.append(elem)
         txids_seen.add(txid)
 
-    # out.sort(key=lambda elem: elem["timestamp"])
     return out
 
 
-def _fetch_and_process_txs(wallet_address, exporter, progress):
-    pages_total_estimate = math.ceil(progress.num_txs / osmo.api_data.LIMIT)
+def _fetch_and_process_txs(wallet_address, exporter, progress, num_txs):
+    # Predetermine pages to retrieve
+    last_page = math.ceil(num_txs / osmo.api_data.LIMIT) - 1
+    pages = range(last_page, -1, -1)
 
-    # Fetch and parse data in batches (Cumulative required too much memory)
-    out = []
-    for i in range(_max_pages()):
-        message = "Fetching txs page {} of {}...".format(i, pages_total_estimate)
-        progress.report(_fetch_and_process_txs.__name__, len(out), message)
+    # Fetch and parse data in batches (cumulative required too much memory), oldest first.
+    # Note: oldest first is opposite of api default (allows simpler lp stake/unstake logic)
+    count_txs_processed = 0
+    txids_seen = set()
+    for page in pages:
+        message = "Fetching txs page={} for range [0, {}]".format(page, last_page)
+        progress.report(_fetch_and_process_txs.__name__, count_txs_processed, message)
 
-        elems = osmo.api_data.get_txs(wallet_address, i * osmo.api_data.LIMIT)
-        elems_clean = _remove_dups(elems)
+        elems = osmo.api_data.get_txs(wallet_address, page*osmo.api_data.LIMIT)
+
+        # Remove duplicates (data from this api has duplicates)
+        elems_clean = _remove_dups(elems, txids_seen)
+
         osmo.processor.process_txs(wallet_address, elems_clean, exporter)
-
-        # Exit early if length of data indicates no more txs.
-        if len(elems) != osmo.api_data.LIMIT:
-            break
+        count_txs_processed += len(elems)
 
     # Report final progress
-    progress.report_message("Retrieved total {} txids...".format(len(out)))
-
-    return out
+    progress.report_message("Retrieved all {} transactions ...".format(num_txs))
 
 
 if __name__ == "__main__":

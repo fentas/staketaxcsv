@@ -1,4 +1,3 @@
-
 """
 usage: python3 report_terra.py <walletaddress> [--format all|cointracking|koinly|..]
 
@@ -11,23 +10,23 @@ Notes:
     * https://docs.figment.io/network-documentation/terra/enriched-apis
 """
 
-import logging
 import json
+import logging
+import math
 import os
 import pprint
-import math
 
+import terra.processor
+from common import report_util
 from common.Cache import Cache
 from common.CacheChain import CacheChain
-from common.Exporter import Exporter
-from common import report_util
-from terra.config_terra import localconfig
-from terra.api_search_figment import SearchAPIFigment, LIMIT_FIGMENT
-from terra.api_fcd import FcdAPI, LIMIT_FCD
-import terra.processor
-from terra.ProgressTerra import ProgressTerra, SECONDS_PER_TX
 from common.ErrorCounter import ErrorCounter
+from common.Exporter import Exporter
 from settings_csv import TERRA_FIGMENT_KEY, TICKER_LUNA
+from terra.api_fcd import LIMIT_FCD, FcdAPI
+from terra.api_search_figment import LIMIT_FIGMENT, SearchAPIFigment
+from terra.config_terra import localconfig
+from terra.ProgressTerra import SECONDS_PER_TX, ProgressTerra
 
 MAX_TRANSACTIONS = 10000
 
@@ -63,6 +62,8 @@ def wallet_exists(wallet_address):
     if not wallet_address.startswith("terra"):
         return False
     data = SearchAPIFigment.get_txs(wallet_address, limit=2)
+    if data is None:
+        return False
     return len(data) > 0
 
 

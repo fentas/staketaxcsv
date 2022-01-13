@@ -1,4 +1,3 @@
-
 """
 LCD documentation:
  * https://lcd.terra.dev/swagger/#/
@@ -6,10 +5,10 @@ LCD documentation:
 """
 
 import logging
-import requests
 import time
 
 from common.CacheChain import CacheChain
+import requests
 from settings_csv import TERRA_LCD_NODE
 
 

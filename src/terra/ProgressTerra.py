@@ -1,6 +1,6 @@
-
 import logging
 import time
+
 from terra.config_terra import localconfig
 
 # Err on the side of overestimating for better user experience

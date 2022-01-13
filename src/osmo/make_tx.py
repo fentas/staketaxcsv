@@ -1,11 +1,15 @@
-
-from common.make_tx import (
-    make_swap_tx, make_reward_tx, make_transfer_in_tx, make_transfer_out_tx,
-    make_unknown_tx, make_unknown_tx_with_transfer, _make_tx_exchange,
-)
-from osmo import util_osmo
 from common.Exporter import Row
 from common.ExporterTypes import TX_TYPE_STAKING
+from common.make_tx import (
+    _make_tx_exchange,
+    make_reward_tx,
+    make_swap_tx,
+    make_transfer_in_tx,
+    make_transfer_out_tx,
+    make_unknown_tx,
+    make_unknown_tx_with_transfer,
+)
+from osmo import util_osmo
 from osmo.constants import EXCHANGE_OSMOSIS
 
 
@@ -103,11 +107,13 @@ def make_osmo_lp_withdraw_tx(txinfo, msginfo, lp_amount, lp_currency, received_a
     return row
 
 
-def make_osmo_lp_stake_tx(txinfo, msginfo, lp_amount, lp_currency):
+def make_osmo_lp_stake_tx(txinfo, msginfo, lp_amount, lp_currency, period_lock_id):
     row = make_osmo_tx(txinfo, msginfo, lp_amount, lp_currency, "", "")
+    row.comment = "lp stake (period_lock_id: {})".format(period_lock_id)
     return row
 
 
-def make_osmo_lp_unstake_tx(txinfo, msginfo, lp_amount, lp_currency):
+def make_osmo_lp_unstake_tx(txinfo, msginfo, lp_amount, lp_currency, period_lock_id):
     row = make_osmo_tx(txinfo, msginfo, "", "", lp_amount, lp_currency)
+    row.comment = "lp unstake (period_lock_id: {})".format(period_lock_id)
     return row

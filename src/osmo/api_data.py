@@ -1,6 +1,7 @@
-
 import time
+
 from osmo.api_util import _query_get
+
 OSMO_DATA_API_NETLOC = "api-osmosis-chain.imperator.co"
 LIMIT = 25
 
@@ -11,10 +12,10 @@ def _query(uri_path, query_params={}, sleep_seconds=1):
     return result
 
 
-def get_count_txs(address):
+def get_count_txs(address, sleep_seconds=1):
     uri_path = f"/txs/v1/tx/count/{address}"
 
-    data = _query(uri_path)
+    data = _query(uri_path, {}, sleep_seconds)
 
     return sum(row["count"] for row in data)
 
