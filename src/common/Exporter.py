@@ -151,8 +151,8 @@ class Exporter:
             TX_TYPE_TRANSFER: "Transfer",
             TX_TYPE_INCOME: "Income",
             TX_TYPE_SPEND: "Spend",
-            TX_TYPE_BORROW: "Transfer",
-            TX_TYPE_REPAY: "Transfer"
+            TX_TYPE_BORROW: "Income (non taxable)",
+            TX_TYPE_REPAY: "Expense (non taxable)"
         }
 
         self.sort_rows(reverse=True)
@@ -690,6 +690,8 @@ class Exporter:
             return "MIR2"
         if currency == "SOL":
             return "SOL2"
+        if currency == "ASTRO":
+            return "ASTRO5"
         return currency
 
     def _cointracker_code(self, currency):

@@ -18,6 +18,7 @@ import pprint
 import math
 
 from common.Cache import Cache
+from common.CacheChain import CacheChain
 from common.Exporter import Exporter
 from common import report_util
 from terra.config_terra import localconfig
@@ -113,6 +114,11 @@ def txhistory(wallet_address, job=None, options=None):
     if localconfig.cache:
         localconfig.currency_addresses = Cache().get_terra_currency_addresses()
         logging.info("Loaded terra_currency_addresses from cache ...")
+        
+        if CacheChain("terra", wallet_address) is None:
+            logging.info("Chache txs and contracts to mongodb ...")
+        else:
+            logging.info("Could not initialize mongodb cache ...")
     if TERRA_FIGMENT_KEY:
         # Optional: Fetch count of transactions to estimate progress more accurately later
         num_txs = _num_txs(wallet_address)
@@ -143,6 +149,7 @@ def _get_txs(wallet_address, progress):
             out = json.load(f)
             return out
 
+    cache = CacheChain()
     offset = 0
     out = []
     for i in range(_max_queries()):
@@ -151,8 +158,14 @@ def _get_txs(wallet_address, progress):
 
         data = FcdAPI.get_txs(wallet_address, offset)
         result = data["txs"]
-        out.extend(result)
 
+        if cache is not None:
+            all_unique = cache.insert_txs(result)
+            if all_unique == False:
+                break
+        else:
+            out.extend(result)
+            
         if len(result) == LIMIT_FCD and "next" in data:
             offset = data["next"]
         else:
@@ -166,6 +179,9 @@ def _get_txs(wallet_address, progress):
         with open(DEBUG_FILE, 'w') as f:
             json.dump(out, f, indent=4)
         logging.info("Wrote to %s for debugging", DEBUG_FILE)
+
+    elif cache is not None:
+        out = list(cache.get_account_txs())
 
     return out
 

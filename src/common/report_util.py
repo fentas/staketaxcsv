@@ -27,7 +27,7 @@ def parse_args():
 
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--cache', action='store_true', default=False,
-                        help="use Cache class (only work if implemented)")
+                        help="use Cache and ChacheChain class (only work if implemented)")
     parser.add_argument('--minor_rewards', action='store_true', default=False,
                         help="(LUNA) include minor currency rewards")
     parser.add_argument("--lp", action="store_true", default=False,

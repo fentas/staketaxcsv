@@ -4,7 +4,8 @@ import requests
 import time
 
 FCD_URL = "https://fcd.terra.dev"
-LIMIT_FCD = 100
+# todo make this configurable
+LIMIT_FCD = 10
 
 
 class FcdAPI:
