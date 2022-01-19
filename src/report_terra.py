@@ -26,13 +26,13 @@ from settings_csv import TERRA_FIGMENT_KEY, TICKER_LUNA
 from terra.api_fcd import LIMIT_FCD, FcdAPI
 from terra.api_search_figment import LIMIT_FIGMENT, SearchAPIFigment
 from terra.config_terra import localconfig
-from terra.ProgressTerra import SECONDS_PER_TX, ProgressTerra
+from terra.progress_terra import SECONDS_PER_TX, ProgressTerra
 
 MAX_TRANSACTIONS = 10000
 
 
 def main():
-    wallet_address, format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args()
     _read_options(options)
 
     if txid:
@@ -40,7 +40,7 @@ def main():
         exporter.export_print()
     else:
         exporter = txhistory(wallet_address, job=None)
-        report_util.run_exports(TICKER_LUNA, wallet_address, exporter, format)
+        report_util.run_exports(TICKER_LUNA, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
@@ -92,7 +92,7 @@ def _max_queries():
 
 def _num_txs(wallet_address):
     num_txs = 0
-    for i in range(_max_queries()):
+    for _ in range(_max_queries()):
         logging.info("estimate_duration() loop num_txs=%s", num_txs)
 
         data = SearchAPIFigment.get_txs(wallet_address, offset=num_txs)
@@ -127,7 +127,7 @@ def txhistory(wallet_address, job=None, options=None):
         logging.info("num_txs=%s", num_txs)
 
     # Retrieve data
-    elems = _get_txs(wallet_address, progress)
+    elems = _get_txs(wallet_address, progress, num_txs)
     elems.sort(key=lambda elem: elem["timestamp"])
 
     # Create rows for CSV
@@ -142,20 +142,21 @@ def txhistory(wallet_address, job=None, options=None):
     return exporter
 
 
-def _get_txs(wallet_address, progress):
+def _get_txs(wallet_address, progress, total_txs):
     # Debugging only: when --debug flag set, read from cache file
-    DEBUG_FILE = "_reports/debugterra.{}.json".format(wallet_address)
-    if localconfig.debug and os.path.exists(DEBUG_FILE):
-        with open(DEBUG_FILE, 'r') as f:
-            out = json.load(f)
-            return out
+    if localconfig.debug:
+        debug_file = f"_reports/debugterra.{wallet_address}.json"
+        if os.path.exists(debug_file):
+            with open(debug_file, "r") as f:
+                out = json.load(f)
+                return out
 
     cache = CacheChain()
     offset = 0
     out = []
-    for i in range(_max_queries()):
+    for _ in range(_max_queries()):
         num_tx = len(out)
-        progress.report(num_tx, "Retrieving transaction {} of {} ...".format(num_tx + 1, progress.num_txs))
+        progress.report(num_tx, f"Retrieving transaction {num_tx + 1} of {total_txs} ...")
 
         data = FcdAPI.get_txs(wallet_address, offset)
         result = data["txs"]
@@ -172,14 +173,14 @@ def _get_txs(wallet_address, progress):
         else:
             break
 
-    message = "Retrieved total {} txids...".format(len(out))
+    message = f"Retrieved total {len(out)} txids..."
     progress.report_message(message)
 
     # Debugging only: when --debug flat set, write to cache file
     if localconfig.debug:
-        with open(DEBUG_FILE, 'w') as f:
+        with open(debug_file, "w") as f:
             json.dump(out, f, indent=4)
-        logging.info("Wrote to %s for debugging", DEBUG_FILE)
+        logging.info("Wrote to %s for debugging", debug_file)
 
     elif cache is not None:
         out = list(cache.get_account_txs())

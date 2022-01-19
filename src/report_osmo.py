@@ -18,14 +18,14 @@ from common.ErrorCounter import ErrorCounter
 from common.Exporter import Exporter
 from osmo.config_osmo import localconfig
 from osmo.lp_rewards import lp_rewards
-from osmo.ProgressOsmo import SECONDS_PER_TX, ProgressOsmo
+from osmo.progress_osmo import SECONDS_PER_TX, ProgressOsmo
 from settings_csv import TICKER_OSMO
 
 MAX_TRANSACTIONS = 5000
 
 
 def main():
-    wallet_address, format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args()
     _read_options(options)
 
     if txid:
@@ -33,7 +33,7 @@ def main():
         exporter.export_print()
     else:
         exporter = txhistory(wallet_address, job=None)
-        report_util.run_exports(TICKER_OSMO, wallet_address, exporter, format)
+        report_util.run_exports(TICKER_OSMO, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
@@ -73,13 +73,6 @@ def estimate_duration(wallet_address):
     return osmo.api_data.get_count_txs(wallet_address, sleep_seconds=0) * SECONDS_PER_TX
 
 
-def _max_pages():
-    max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
-    max_pages = math.ceil(max_txs / osmo.api_data.LIMIT)
-    logging.info("max_txs: %s, max_pages: %s", max_txs, max_pages)
-    return max_pages
-
-
 def txhistory(wallet_address, job=None, options=None):
     exporter = Exporter(wallet_address)
     progress = ProgressOsmo()
@@ -95,6 +88,7 @@ def txhistory(wallet_address, job=None, options=None):
 
     # Estimate total time to create CSV
     reward_tokens = osmo.api_data.get_lp_tokens(wallet_address)
+
     num_txs = min(osmo.api_data.get_count_txs(wallet_address), MAX_TRANSACTIONS)
     progress.set_estimate(num_txs, len(reward_tokens))
     logging.info("num_txs: %s", num_txs)
@@ -110,14 +104,13 @@ def txhistory(wallet_address, job=None, options=None):
 
     if localconfig.cache:
         # Remove entries where no symbol was found
-        localconfig.ibc_addresses = {k: v for k, v in localconfig.ibc_addresses.items()
-                                     if not v.startswith("ibc/")}
+        localconfig.ibc_addresses = {k: v for k, v in localconfig.ibc_addresses.items() if not v.startswith("ibc/")}
         Cache().set_osmo_ibc_addresses(localconfig.ibc_addresses)
     return exporter
 
 
 def _remove_dups(elems, txids_seen):
-    """ API data has duplicate transaction data.  Clean it. """
+    """API data has duplicate transaction data.  Clean it."""
     out = []
     for elem in elems:
         txid = elem["txhash"]
@@ -140,19 +133,22 @@ def _fetch_and_process_txs(wallet_address, exporter, progress, num_txs):
     count_txs_processed = 0
     txids_seen = set()
     for page in pages:
-        message = "Fetching txs page={} for range [0, {}]".format(page, last_page)
-        progress.report(_fetch_and_process_txs.__name__, count_txs_processed, message)
+        message = f"Fetching txs page={page} for range [0, {last_page}]"
+        progress.report(count_txs_processed, message, "txs")
 
-        elems = osmo.api_data.get_txs(wallet_address, page*osmo.api_data.LIMIT)
+        elems = osmo.api_data.get_txs(wallet_address, page * osmo.api_data.LIMIT)
 
         # Remove duplicates (data from this api has duplicates)
         elems_clean = _remove_dups(elems, txids_seen)
+
+        # Sort to process oldest first (so that lock/unlock tokens transactions processed correctly)
+        elems_clean.sort(key=lambda elem: elem["timestamp"])
 
         osmo.processor.process_txs(wallet_address, elems_clean, exporter)
         count_txs_processed += len(elems)
 
     # Report final progress
-    progress.report_message("Retrieved all {} transactions ...".format(num_txs))
+    progress.report(num_txs, f"Retrieved all {num_txs} transactions...", "txs")
 
 
 if __name__ == "__main__":
