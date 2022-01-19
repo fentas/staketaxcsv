@@ -25,6 +25,9 @@ from common.ExporterTypes import (
     TX_TYPE_TRANSFER,
     TX_TYPES_CSVEXPORT,
     TX_TYPES_TAXABLE,
+    TX_TYPE_FEE,
+    TX_TYPE_FEE_SETTLEMENT,
+    TX_TYPE_FEE_BORROWING,
     ZEN_FIELDS,
 )
 from pytz import timezone
@@ -169,7 +172,10 @@ class Exporter:
             TX_TYPE_INCOME: "Income",
             TX_TYPE_SPEND: "Spend",
             TX_TYPE_BORROW: "Income (non taxable)",
-            TX_TYPE_REPAY: "Expense (non taxable)"
+            TX_TYPE_REPAY: "Expense (non taxable)",
+            TX_TYPE_FEE: "Other Fee",
+            TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
+            TX_TYPE_FEE_BORROWING: "Borrowing Fee",
         }
 
         self.sort_rows(reverse=True)
@@ -709,6 +715,22 @@ class Exporter:
             return "SOL2"
         if currency == "ASTRO":
             return "ASTRO5"
+        if currency == "BETH":
+            return "BETH3"
+        # stablecoins to currency to track correct value
+        if currency == "SGT":
+            return "SGD"
+        if currency == "SET":
+            return "SEK"
+        # todo this does not exist event as currency
+        if currency == "MNT":
+            return "MNT2"
+        if currency == "INT":
+            return "INR"
+        if currency == "CNT":
+            return "CNY"
+        if currency == "CAT":
+            return "CAD"
         return currency
 
     def _cointracker_code(self, currency):

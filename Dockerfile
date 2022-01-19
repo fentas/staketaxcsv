@@ -12,12 +12,6 @@ RUN apk upgrade --no-cache \
   && rm -rf /var/cache/* \
   && rm -rf /root/.cache/*
 
-# install atom gaiad
-ENV GAIA_VERSION v6.0.0
-RUN curl -LIo /usr/local/bin/gaiad \
-  https://github.com/cosmos/gaia/releases/download/$GAIA_VERSION/gaiad-$GAIA_VERSION-linux-amd64 \
-  && chmod +x /usr/local/bin/gaiad
-
 # setup repository
 WORKDIR /staketaxcsv
 

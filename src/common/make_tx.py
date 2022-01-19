@@ -9,6 +9,8 @@ from common.ExporterTypes import (
     TX_TYPE_TRADE,
     TX_TYPE_TRANSFER,
     TX_TYPE_UNKNOWN,
+    TX_TYPE_FEE,
+    TX_TYPE_FEE_SETTLEMENT,
 )
 from settings_csv import DONATION_WALLETS
 
@@ -32,8 +34,8 @@ def make_spend_tx(txinfo, sent_amount, sent_currency):
     return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_SPEND)
 
 
-def make_just_fee_tx(txinfo, fee_amount, fee_currency):
-    return _make_tx_sent(txinfo, fee_amount, fee_currency, TX_TYPE_SPEND, empty_fee=True)
+def make_just_fee_tx(txinfo, fee_amount, fee_currency, tx_type=TX_TYPE_FEE):
+    return _make_tx_sent(txinfo, fee_amount, fee_currency, tx_type, empty_fee=True)
 
 
 def make_transfer_out_tx(txinfo, sent_amount, sent_currency, dest_address=None):
