@@ -32,7 +32,7 @@ MAX_TRANSACTIONS = 10000
 
 
 def main():
-    wallet_address, export_format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args(TICKER_LUNA)
     _read_options(options)
 
     if txid:
@@ -44,18 +44,15 @@ def main():
 
 
 def _read_options(options):
-    if options:
-        # Check for options with non-default values
-        if options.get("debug") is True:
-            localconfig.debug = True
-        if options.get("cache") is True:
-            localconfig.cache = True
-        if options.get("minor_rewards") is True:
-            localconfig.minor_rewards = True
-        if options.get("lp") is True:
-            localconfig.lp = True
-        if options.get("limit"):
-            localconfig.limit = options.get("limit")
+    if not options:
+        return
+
+    localconfig.debug = options.get("debug", False)
+    localconfig.cache = options.get("cache", False)
+    localconfig.limit = options.get("limit", None)
+    localconfig.lp_transfers = options.get("lp_transfers", False)
+    localconfig.lp_trades = options.get("lp_trades", False)
+    localconfig.minor_rewards = options.get("minor_rewards", False)
 
 
 def wallet_exists(wallet_address):
@@ -92,7 +89,9 @@ def _max_queries():
 
 def _num_txs(wallet_address):
     num_txs = 0
-    for _ in range(_max_queries()):
+    figment_max_queries = math.ceil(MAX_TRANSACTIONS / LIMIT_FIGMENT)
+
+    for _ in range(figment_max_queries):
         logging.info("estimate_duration() loop num_txs=%s", num_txs)
 
         data = SearchAPIFigment.get_txs(wallet_address, offset=num_txs)
@@ -127,7 +126,7 @@ def txhistory(wallet_address, job=None, options=None):
         logging.info("num_txs=%s", num_txs)
 
     # Retrieve data
-    elems = _get_txs(wallet_address, progress, num_txs)
+    elems = _get_txs(wallet_address, progress)
     elems.sort(key=lambda elem: elem["timestamp"])
 
     # Create rows for CSV
@@ -142,7 +141,7 @@ def txhistory(wallet_address, job=None, options=None):
     return exporter
 
 
-def _get_txs(wallet_address, progress, total_txs):
+def _get_txs(wallet_address, progress):
     # Debugging only: when --debug flag set, read from cache file
     if localconfig.debug:
         debug_file = f"_reports/debugterra.{wallet_address}.json"
@@ -156,7 +155,7 @@ def _get_txs(wallet_address, progress, total_txs):
     out = []
     for _ in range(_max_queries()):
         num_tx = len(out)
-        progress.report(num_tx, f"Retrieving transaction {num_tx + 1} of {total_txs} ...")
+        progress.report(num_tx, f"Retrieving transaction {num_tx + 1} ...")
 
         data = FcdAPI.get_txs(wallet_address, offset)
         result = data["txs"]

@@ -28,7 +28,7 @@ RPC_TIMEOUT = 600  # seconds
 
 
 def main():
-    wallet_address, export_format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args(TICKER_SOL)
     _read_options(options)
 
     if txid:
@@ -40,13 +40,12 @@ def main():
 
 
 def _read_options(options):
-    if options:
-        if options.get("debug") is True:
-            localconfig.debug = True
-        if options.get("cache") is True:
-            localconfig.cache = True
-        if options.get("limit"):
-            localconfig.limit = options.get("limit")
+    if not options:
+        return
+
+    localconfig.debug = options.get("debug", False)
+    localconfig.cache = options.get("cache", False)
+    localconfig.limit = options.get("limit", None)
 
 
 def wallet_exists(wallet_address):

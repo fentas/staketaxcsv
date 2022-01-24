@@ -2,7 +2,7 @@
 # staketaxcsv
 
 * Python repository to create blockchain CSVs for Terra (LUNA), Solana (SOL), Cosmos (ATOM),
-  and Osmosis (OSMO) blockchains.
+  Osmosis (OSMO), and Algorand (ALGO) blockchains.
 * CSV codebase for <https://stake.tax>
 * Community contribution and PRs are most welcome, especially to fix/support new types of
   protocols/transactions.
@@ -10,7 +10,7 @@
 # Usage
 
 * Same arguments apply for report_terra.py (LUNA), report_sol.py (SOL), report_atom.py (ATOM),
-  report_osmo.py (OSMO):
+  report_osmo.py (OSMO), report_algo.py (ALGO):
 
   ```sh
   # Load environment variables from sample.env (add to ~/.bash_profile or ~/.bashrc to avoid doing every time)
@@ -48,7 +48,7 @@ See [Docker](README_reference.md#docker) to alternatively install/run in docker 
 
 # Contributing Code
 
-* Code style follows `pep8`.  This can be tested with `pycodestyle`.
+* See [Linting](README_reference.md#linting) to see code style feedback.
 * Providing a sample txid will expedite a pull request (email support@stake.tax,
   DM @staketax, etc.):
 
@@ -62,6 +62,7 @@ See [Docker](README_reference.md#docker) to alternatively install/run in docker 
 See [README_reference.md](README_reference.md):
 
 * [Code Style](README_reference.md#code-style)
+* [Linting](README_reference.md#linting)
 * [Unit Tests](README_reference.md#unit-tests)
 * [Docker](README_reference.md#docker)
 * [Ideal Configuration](README_reference.md#ideal-configuration)
