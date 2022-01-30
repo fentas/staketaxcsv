@@ -5,6 +5,7 @@ from datetime import datetime
 
 import pandas as pd
 import pytz
+from algo.constants import EXCHANGE_ALGORAND_BLOCKCHAIN
 from common.ExporterTypes import (
     ACCOINT_FIELDS,
     CALC_FIELDS,
@@ -671,13 +672,6 @@ class Exporter:
         logging.info("Wrote to %s", csvpath)
 
     def export_taxbit_csv(self, csvpath):
-        """
-        This is experimental non-working version of TaxBit CSV
-
-        I tried integration to TaxBit website, but there were some unresolved errors.  Some transactions
-        succeeded, but others did not.  CSV imports fail silently, and support did not provide any feedback.
-        So this is only a draft implementation according to the website spec.
-        """
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
@@ -710,6 +704,8 @@ class Exporter:
                 exchange = self.rows[0].exchange if len(self.rows) else ""
                 if exchange == EXCHANGE_SOLANA_BLOCKCHAIN:
                     tx_source = "SOL WALLET"
+                elif exchange == EXCHANGE_ALGORAND_BLOCKCHAIN:
+                    tx_source = "ALGO WALLET"
                 else:
                     tx_source = ""
                     logging.critical("Bad condition: unable to identify tx_source in export_taxbit_csv()")
@@ -818,6 +814,8 @@ class Exporter:
             return "CNY"
         if currency == "CAT":
             return "CAD"
+        if currency == "wtUST":
+            return "UST3"
         return currency
 
     def _cointracker_code(self, currency):

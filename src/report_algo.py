@@ -12,6 +12,7 @@ import pprint
 
 import algo.processor
 from algo.api_algoindexer import LIMIT_ALGOINDEXER, AlgoIndexerAPI
+from algo.api_indexer import IndexerAPI
 from algo.config_algo import localconfig
 from algo.progress_algo import ProgressAlgo
 from common import report_util
@@ -23,11 +24,11 @@ MAX_TRANSACTIONS = 10000
 
 
 def main():
-    wallet_address, export_format, txid, options = report_util.parse_args(TICKER_ALGO)
+    wallet_address, export_format, txid_or_groupid, options = report_util.parse_args(TICKER_ALGO)
     _read_options(options)
 
-    if txid:
-        exporter = txone(wallet_address, txid)
+    if txid_or_groupid:
+        exporter = txone(wallet_address, txid_or_groupid)
         exporter.export_print()
     else:
         exporter = txhistory(wallet_address)
@@ -35,31 +36,32 @@ def main():
 
 
 def _read_options(options):
-    if options:
-        # Check for options with non-default values
-        if options.get("debug") is True:
-            localconfig.debug = True
-        if options.get("cache") is True:
-            localconfig.cache = True
-        if options.get("limit"):
-            localconfig.limit = options.get("limit")
+    if not options:
+        return
+    report_util.read_common_options(localconfig, options)
+    logging.info("localconfig: %s", localconfig.__dict__)
 
 
 def wallet_exists(wallet_address):
     return AlgoIndexerAPI.account_exists(wallet_address)
 
 
-def txone(wallet_address, txid):
+def txone(wallet_address, txid_or_groupid):
     progress = ProgressAlgo()
 
-    data = AlgoIndexerAPI.get_transaction(txid)
+    data = AlgoIndexerAPI.get_transaction(txid_or_groupid)
+    if data:
+        elems = [data]
+    else:
+        elems = IndexerAPI.get_transactions_by_group(txid_or_groupid)
+
     print("\ndebug data:")
-    pprint.pprint(data)
+    pprint.pprint(elems)
     print("")
 
     progress.set_estimate(1)
     exporter = Exporter(wallet_address)
-    algo.processor.process_txs(wallet_address, [data], exporter, progress)
+    algo.processor.process_txs(wallet_address, elems, exporter, progress)
     print("")
 
     return exporter
@@ -72,14 +74,19 @@ def _max_queries():
     return max_queries
 
 
-def txhistory(wallet_address):
+def txhistory(wallet_address, job=None, options=None):
     progress = ProgressAlgo()
+    exporter = Exporter(wallet_address)
+
+    if options:
+        _read_options(options)
+    if job:
+        localconfig.job = job
 
     # Retrieve data
     elems = _get_txs(wallet_address, progress)
 
     # Create rows for CSV
-    exporter = Exporter(wallet_address)
     algo.processor.process_txs(wallet_address, elems, exporter, progress)
 
     # Log error stats if exists

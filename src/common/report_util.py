@@ -3,7 +3,7 @@ import logging
 import os
 
 from common.ExporterTypes import FORMAT_DEFAULT, FORMATS
-from settings_csv import REPORTS_DIR, TICKER_ATOM, TICKER_LUNA, TICKER_OSMO
+from settings_csv import REPORTS_DIR, TICKER_ATOM, TICKER_LUNA, TICKER_OSMO, TICKER_ALGO
 
 ALL = "all"
 
@@ -108,3 +108,10 @@ def run_exports(ticker, wallet_address, exporter, export_format):
         # Write one csv
         csvpath = f"{REPORTS_DIR}/{ticker}.{wallet_address}.{cur_format}.csv"
         exporter.export_format(cur_format, csvpath)
+
+
+def read_common_options(localconfig, options):
+    localconfig.debug = options.get("debug", False)
+    localconfig.cache = options.get("cache", False)
+    localconfig.limit = options.get("limit", None)
+

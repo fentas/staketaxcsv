@@ -32,19 +32,18 @@ def main():
         exporter = txone(wallet_address, txid)
         exporter.export_print()
     else:
-        exporter = txhistory(wallet_address, job=None)
+        exporter = txhistory(wallet_address)
         report_util.run_exports(TICKER_OSMO, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
     if not options:
         return
+    report_util.read_common_options(localconfig, options)
 
-    localconfig.debug = options.get("debug", False)
-    localconfig.cache = options.get("cache", False)
-    localconfig.limit = options.get("limit", None)
     localconfig.lp_transfers = options.get("lp_transfers", False)
     localconfig.lp_trades = options.get("lp_trades", False)
+    logging.info("localconfig: %s", localconfig.__dict__)
 
 
 def wallet_exists(wallet_address):
@@ -83,8 +82,8 @@ def _pages(wallet_address):
 
 
 def txhistory(wallet_address, job=None, options=None):
-    exporter = Exporter(wallet_address)
     progress = ProgressOsmo()
+    exporter = Exporter(wallet_address)
 
     if options:
         _read_options(options)

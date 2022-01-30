@@ -42,10 +42,8 @@ def main():
 def _read_options(options):
     if not options:
         return
-
-    localconfig.debug = options.get("debug", False)
-    localconfig.cache = options.get("cache", False)
-    localconfig.limit = options.get("limit", None)
+    report_util.read_common_options(localconfig, options)
+    logging.info("localconfig: %s", localconfig.__dict__)
 
 
 def wallet_exists(wallet_address):
@@ -109,18 +107,20 @@ def _num_txids(wallet_address):
     return len(txids)
 
 
-def txhistory(wallet_address, job=None):
+def txhistory(wallet_address, job=None, options=None):
     progress = ProgressSol()
-    wallet_info = WalletInfo(wallet_address)
     exporter = Exporter(wallet_address)
+    wallet_info = WalletInfo(wallet_address)
 
-    logging.info("Using SOLANA_URL=%s...", SOL_NODE)
+    if options:
+        _read_options(options)
     if job:
         localconfig.job = job
         localconfig.cache = True
     if localconfig.cache:
         localconfig.blocks = Cache().get_sol_blocks()
         logging.info("Loaded sol blocks info into cache...")
+    logging.info("Using SOLANA_URL=%s...", SOL_NODE)
 
     # Fetch data to so that job progress can be estimated ##########
 
