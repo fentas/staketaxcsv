@@ -12,6 +12,9 @@
   * Same arguments apply for report_terra.py (LUNA), report_sol.py (SOL), report_atom.py (ATOM),
     report_osmo.py (OSMO):
     ```
+    # Load requirement environment variables
+    source sample.env
+    
     cd src
     
     # Create default CSV
@@ -27,22 +30,30 @@
 # Install
 
   1. Install python 3.9 ([one way](README_reference.md#installing-python-39-on-macos))
-  2. Install pip packages and load environment variables
+  2. Install pip packages
      ```
      pip3 install -r requirements.txt
-     
-     set -o allexport
-     source sample.env
-     set +o allexport
      ```
-  3. Edit (~/.bashrc, ~/.zshrc, shell equivalent) so future shell sessions load `sample.env`:
-  ```
-  set -o allexport
-  source <PATH_TO_SAMPLE_ENV_HERE>/sample.env
-  set +o allexport
-  ```
-  4. For ATOM only, install `gaiad` (https://hub.cosmos.network/main/getting-started/installation.html)
+  3. For ATOM only, install `gaiad` (https://hub.cosmos.network/main/getting-started/installation.html)
 
+# Docker
+
+```sh
+# build the docker container
+docker build --tag staketaxcsv .
+
+# create local directory for reports
+mkdir ~/staketaxcsv
+
+# get all supported chains with: 
+docker run staketaxcsv help
+
+# then run it like
+docker run -v ~/staketaxcsv:/reports staketaxcsv <chain: (like 'terra')> -h
+
+# you can also directly exec into the container with
+docker run -it staketaxcsv sh
+```
 
 # Contributing Code
 
