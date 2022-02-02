@@ -159,6 +159,19 @@ def process_tx(wallet_address, elem, exporter):
             elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
                 return handle_governance_reward(exporter, elem, txinfo)
 
+# non found
+# terra1mtwph2juhj0rvjz7dy92gvl6xvukaxu8rfv8ts -- bluna hub
+# terra1fxwelge6mf5l6z0rjpylzcfq9w9tw2q7tewaf5 -- spec staking
+
+# loookup found
+# terra1s5eczhe0h0jutf46re52x5z4r03c8hupacxmdr -- spec token
+# terra15gwkyepfc6xgca5t5zefzwy42uts8l2m4g40k6 -- mir
+# terra14y5affaarufk3uscy2vr6pe6w6zqf2wpjzn5sh -- mtsla
+# terra14z56l0fp2lsf86zy3hty2z47ezkhnthtr9yq76 -- anc
+# terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy -- mine
+# terra1dy9kmlm4anr92e42mrkjwzyvfqwz66un00rwr5 -- vkr
+# 
+
             # Anchor Borrow Transactions
             elif execute_type == ex.EXECUTE_TYPE_BORROW_STABLE:
                 return handle_borrow(exporter, elem, txinfo)

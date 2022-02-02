@@ -116,9 +116,11 @@ def txhistory(wallet_address, job=None, options=None):
         logging.info("Loaded terra_currency_addresses from cache ...")
         
         if CacheChain("terra", wallet_address) is None:
-            logging.info("Chache txs and contracts to mongodb ...")
-        else:
             logging.info("Could not initialize mongodb cache ...")
+        else:
+            logging.info("Chache txs and contracts to mongodb ...")
+
+    num_txs=None
     if TERRA_FIGMENT_KEY:
         # Optional: Fetch count of transactions to estimate progress more accurately later
         num_txs = _num_txs(wallet_address)

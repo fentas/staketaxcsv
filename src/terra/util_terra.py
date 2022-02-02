@@ -8,6 +8,8 @@ from terra.api_lcd import LcdAPI
 from terra.config_terra import localconfig
 from terra.constants import CUR_ORION, IBC_TOKEN_NAMES, MILLION
 
+from osmo import util_osmo
+
 
 def _contracts(elem):
     out = []
@@ -317,6 +319,7 @@ def _init_msg(data):
 
 def _ibc_token_name(address):
     # ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B -> "OSMO"
+    #cur = util_osmo._ibc_currency(address)
     return IBC_TOKEN_NAMES.get(address, address)
 
 

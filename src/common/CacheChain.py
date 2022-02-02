@@ -10,6 +10,15 @@ CHAIN_CONFIG = {
             "txhash": "txhash",
             "timestamp": "timestamp"
         },
+        "sort": ASCENDING,
+        "ignore": ["raw_log"]
+    },
+    "osmo": {
+        "keys": {
+            "txhash": "txhash",
+            "timestamp": "timestamp"
+        },
+        "sort": DESCENDING,
         "ignore": ["raw_log"]
     },
 }
@@ -71,10 +80,11 @@ class CacheChain:
         return self.db.account.aggregate([
             {
                 "$match": {
-                    "account": self.account
+                    "account": self.account,
+                    "timestamp": { "$gte" : "2021-06-01T2:00:00Z" },
                 }
             },
-            { "$sort": { "timestamp": ASCENDING } },
+            { "$sort": { "timestamp": self._chain['sort'] } },
             {
                 "$lookup": {
                     "from": "txs",
@@ -108,6 +118,7 @@ class CacheChain:
                     "timestamp": tx[self._chain['keys']['timestamp']]
                 })
             except errors.DuplicateKeyError:
+                logging.info("duplicate account tx: %s", tx[self._chain['keys']['txhash']])
                 return False
 
         return True

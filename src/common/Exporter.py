@@ -788,26 +788,38 @@ class Exporter:
         return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _cointracking_code(self, currency):
+        # Terra
         if currency == "ANC":
             return "ANC2"
         if currency == "LUNA":
             return "LUNA2"
         if currency == "MIR":
             return "MIR2"
+        if currency == "MINE":
+            return "MINE2"
         if currency == "SOL":
             return "SOL2"
         if currency == "ASTRO":
             return "ASTRO5"
         if currency == "BETH":
             return "BETH3"
-        # stablecoins to currency to track correct value
+        if currency == "Psi":
+            return "PSI2"
+        if currency == "ORION":
+            return "ORION2"
+        if currency == "WHALE":
+            return "WHALE3"
+        if currency == "PLY":
+            return "PLY3"
+        if currency == "TWD":
+            return "TWD2"
+        if currency == "GLOW":
+            return "GLOW3"
+        # Terra: stablecoins to currency to track correct value
         if currency == "SGT":
             return "SGD"
         if currency == "SET":
             return "SEK"
-        # todo this does not exist event as currency
-        if currency == "MNT":
-            return "MNT2"
         if currency == "INT":
             return "INR"
         if currency == "CNT":
@@ -816,6 +828,12 @@ class Exporter:
             return "CAD"
         if currency == "wtUST":
             return "UST3"
+        # todo this does not exist event as currency
+        if currency == "MNT":
+            return "MNT2"
+        # Cosmos
+        if currency == "ATOM":
+            return "ATOM2"
         return currency
 
     def _cointracker_code(self, currency):

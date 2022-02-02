@@ -66,6 +66,11 @@ EXECUTE_TYPE_SUBMIT_VAA = "submit_vaa"
 def _execute_type(elem, txinfo, index=0):
     txid = txinfo.txid
     execute_msg = util_terra._execute_msg(elem, index)
+    contract = util_terra._contract(elem, 0)
+    try:
+        addr = util_terra._lookup_address(contract, txid)
+    except Exception:
+        pass
 
     if "send" in execute_msg:
         send = execute_msg["send"]
@@ -118,7 +123,7 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS
     elif "transfer" in execute_msg:
         return EXECUTE_TYPE_TRANSFER
-    elif "provide_liquidity" in execute_msg:
+    elif "provide_liquidity" in execute_msg or "bond" in execute_msg and len(addr):
         return EXECUTE_TYPE_PROVIDE_LIQUIDITY
     elif "increase_allowance" in execute_msg:
         return _execute_type(elem, txinfo, index + 1)
@@ -188,7 +193,7 @@ def _execute_type(elem, txinfo, index=0):
     elif "submit_vaa" in execute_msg:
         return EXECUTE_TYPE_SUBMIT_VAA
 
-    logging.error("Unable to determine execute type for txid=%s", txid, extra={
+    logging.error("Unable to determine execute type for txid=%s %s", txid, execute_msg, extra={
         "txid": txid,
         "execute_msg": execute_msg
     })
