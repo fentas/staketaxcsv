@@ -1,3 +1,28 @@
+# CSV formats
+FORMAT_DEFAULT = "default"
+FORMAT_BALANCES = "balances"
+FORMAT_ACCOINTING = "accointing"
+FORMAT_COINTRACKING = "cointracking"
+FORMAT_COINTRACKER = "cointracker"
+FORMAT_CRYPTOTAXCALCULATOR = "cryptotaxcalculator"
+FORMAT_KOINLY = "koinly"
+FORMAT_TAXBIT = "taxbit"
+FORMAT_TOKENTAX = "tokentax"
+FORMAT_ZENLEDGER = "zenledger"
+FORMATS = [
+    FORMAT_DEFAULT,
+    FORMAT_BALANCES,
+    FORMAT_ACCOINTING,
+    FORMAT_COINTRACKING,
+    FORMAT_COINTRACKER,
+    FORMAT_CRYPTOTAXCALCULATOR,
+    FORMAT_KOINLY,
+    FORMAT_TAXBIT,
+    FORMAT_TOKENTAX,
+    FORMAT_ZENLEDGER
+]
+
+#
 
 # Note: TX_TYPE=_* means transaction is not included in non-default CSVs
 # (i.e. _STAKING_DELEGATE is not included in koinly, cointracking, ... )
@@ -13,6 +38,9 @@ TX_TYPE_SPEND = "SPEND"
 TX_TYPE_INCOME = "INCOME"
 TX_TYPE_BORROW = "BORROW"
 TX_TYPE_REPAY = "REPAY"
+TX_TYPE_FEE = "FEE"
+TX_TYPE_FEE_SETTLEMENT = "FEE_SETTLEMENT"
+TX_TYPE_FEE_BORROWING = "FEE_BORROWING"
 
 # Common non-exportable transactions
 TX_TYPE_LP_DEPOSIT = "_LP_DEPOSIT"
@@ -79,6 +107,8 @@ TX_TYPE_SOL_STAKE = "_STAKE"               # Ray stake, LP stake, etc. (not Sola
 TX_TYPE_SOL_UNSTAKE = "_UNSTAKE"           # Ray unstake
 TX_TYPE_SOL_REWARD_ZERO = "_REWARD_ZERO"   # Ray staking reward 0
 TX_TYPE_SOL_SERUM_DEX = "_SERUM_DEX"
+TX_TYPE_SOL_TRANSFER_SELF = "_TRANSFER_SELF"
+TX_TYPE_SOL_WORMHOLE_NOOP = "_WORMHOLE_NOOP"
 
 # ### OSMO ##########################################################################################
 
@@ -100,7 +130,10 @@ TX_TYPES_CSVEXPORT = [
     TX_TYPE_INCOME,
     TX_TYPE_TRANSFER,
     TX_TYPE_BORROW,
-    TX_TYPE_REPAY
+    TX_TYPE_REPAY,
+    TX_TYPE_FEE,
+    TX_TYPE_FEE_SETTLEMENT,
+    TX_TYPE_FEE_BORROWING,
 ]
 
 # Types with taxable=True

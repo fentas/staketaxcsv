@@ -1,9 +1,18 @@
-
-from common.Exporter import (
-    Row
+from common.Exporter import Row
+from common.ExporterTypes import (
+    TX_TYPE_AIRDROP,
+    TX_TYPE_BORROW,
+    TX_TYPE_INCOME,
+    TX_TYPE_REPAY,
+    TX_TYPE_SOL_TRANSFER_SELF,
+    TX_TYPE_SPEND,
+    TX_TYPE_STAKING,
+    TX_TYPE_TRADE,
+    TX_TYPE_TRANSFER,
+    TX_TYPE_UNKNOWN,
+    TX_TYPE_FEE,
+    TX_TYPE_FEE_SETTLEMENT,
 )
-from common.ExporterTypes import TX_TYPE_STAKING, TX_TYPE_AIRDROP, TX_TYPE_TRADE, TX_TYPE_TRANSFER, TX_TYPE_SPEND, \
-    TX_TYPE_INCOME, TX_TYPE_BORROW, TX_TYPE_REPAY, TX_TYPE_UNKNOWN
 from settings_csv import DONATION_WALLETS
 
 
@@ -26,12 +35,12 @@ def make_spend_tx(txinfo, sent_amount, sent_currency):
     return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_SPEND)
 
 
-def make_just_fee_tx(txinfo, fee_amount, fee_currency):
-    return _make_tx_sent(txinfo, fee_amount, fee_currency, TX_TYPE_SPEND, empty_fee=True)
+def make_just_fee_tx(txinfo, fee_amount, fee_currency, tx_type=TX_TYPE_FEE):
+    return _make_tx_sent(txinfo, fee_amount, fee_currency, tx_type, empty_fee=True)
 
 
 def make_transfer_out_tx(txinfo, sent_amount, sent_currency, dest_address=None):
-    if DONATION_WALLETS and dest_address in DONATION_WALLETS:
+    if dest_address and dest_address in DONATION_WALLETS:
         return make_spend_tx(txinfo, sent_amount, sent_currency)
     else:
         return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_TRANSFER)
@@ -46,6 +55,10 @@ def make_transfer_in_tx(txinfo, received_amount, received_currency):
         return _make_tx_received(txinfo, received_amount, received_currency, TX_TYPE_INCOME)
     else:
         return _make_tx_received(txinfo, received_amount, received_currency, TX_TYPE_TRANSFER)
+
+
+def make_transfer_self(txinfo):
+    return make_simple_tx(txinfo, TX_TYPE_SOL_TRANSFER_SELF)
 
 
 def make_borrow_tx(txinfo, received_amount, received_currency, empty_fee=False, z_index=0):

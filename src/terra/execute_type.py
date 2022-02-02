@@ -1,8 +1,8 @@
-
-import logging
-from terra import util_terra
 import base64
 import json
+import logging
+
+from terra import util_terra
 
 EXECUTE_TYPE_UNKNOWN = "unknown_execute_type"
 EXECUTE_TYPE_SWAP = "swap"
@@ -59,11 +59,18 @@ EXECUTE_TYPE_SEND_NFT = "send_nft"
 EXECUTE_TYPE_AIRDROP = "airdrop"
 EXECUTE_TYPE_ZAP_INTO_STRATEGY = "zap_into_strategy"
 EXECUTE_TYPE_ZAP_OUT_OF_STRATEGY = "zap_out_of_strategy"
+EXECUTE_TYPE_DEPOSIT_TOKENS = "deposit_tokens"
+EXECUTE_TYPE_SUBMIT_VAA = "submit_vaa"
 
 
 def _execute_type(elem, txinfo, index=0):
     txid = txinfo.txid
     execute_msg = util_terra._execute_msg(elem, index)
+    contract = util_terra._contract(elem, 0)
+    try:
+        addr = util_terra._lookup_address(contract, txid)
+    except Exception:
+        pass
 
     if "send" in execute_msg:
         send = execute_msg["send"]
@@ -116,7 +123,7 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS
     elif "transfer" in execute_msg:
         return EXECUTE_TYPE_TRANSFER
-    elif "provide_liquidity" in execute_msg:
+    elif "provide_liquidity" in execute_msg or "bond" in execute_msg and len(addr):
         return EXECUTE_TYPE_PROVIDE_LIQUIDITY
     elif "increase_allowance" in execute_msg:
         return _execute_type(elem, txinfo, index + 1)
@@ -181,8 +188,12 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_ZAP_INTO_STRATEGY
     elif "zap_out_of_strategy" in execute_msg:
         return EXECUTE_TYPE_ZAP_OUT_OF_STRATEGY
+    elif "deposit_tokens" in execute_msg:
+        return EXECUTE_TYPE_DEPOSIT_TOKENS
+    elif "submit_vaa" in execute_msg:
+        return EXECUTE_TYPE_SUBMIT_VAA
 
-    logging.error("Unable to determine execute type for txid=%s", txid, extra={
+    logging.error("Unable to determine execute type for txid=%s %s", txid, execute_msg, extra={
         "txid": txid,
         "execute_msg": execute_msg
     })

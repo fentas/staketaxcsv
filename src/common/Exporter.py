@@ -1,23 +1,55 @@
-
 import csv
-from datetime import datetime
-import logging
 import io
-from pytz import timezone
-import pytz
-from tabulate import tabulate
+import logging
+from datetime import datetime
+
 import pandas as pd
+import pytz
+from algo.constants import EXCHANGE_ALGORAND_BLOCKCHAIN
 from common.ExporterTypes import (
-    TX_TYPE_STAKING, TX_TYPE_AIRDROP, TX_TYPE_TRADE, TX_TYPE_TRANSFER, TX_TYPE_SPEND,
-    TX_TYPE_INCOME, TX_TYPE_BORROW, TX_TYPE_REPAY, TX_TYPES_CSVEXPORT, TX_TYPES_TAXABLE, ROW_FIELDS, TEST_ROW_FIELDS,
-    CT_FIELDS, TT_FIELDS, CR_FIELDS, KOINLY_FIELDS, CALC_FIELDS, ACCOINT_FIELDS, ZEN_FIELDS, TAXBIT_FIELDS
+    ACCOINT_FIELDS,
+    CALC_FIELDS,
+    CR_FIELDS,
+    CT_FIELDS,
+    FORMAT_ACCOINTING,
+    FORMAT_BALANCES,
+    FORMAT_COINTRACKER,
+    FORMAT_COINTRACKING,
+    FORMAT_CRYPTOTAXCALCULATOR,
+    FORMAT_DEFAULT,
+    FORMAT_KOINLY,
+    FORMAT_TAXBIT,
+    FORMAT_TOKENTAX,
+    FORMAT_ZENLEDGER,
+    KOINLY_FIELDS,
+    ROW_FIELDS,
+    TAXBIT_FIELDS,
+    TEST_ROW_FIELDS,
+    TT_FIELDS,
+    TX_TYPE_AIRDROP,
+    TX_TYPE_BORROW,
+    TX_TYPE_INCOME,
+    TX_TYPE_REPAY,
+    TX_TYPE_SPEND,
+    TX_TYPE_STAKING,
+    TX_TYPE_TRADE,
+    TX_TYPE_TRANSFER,
+    TX_TYPES_CSVEXPORT,
+    TX_TYPES_TAXABLE,
+    TX_TYPE_FEE,
+    TX_TYPE_FEE_SETTLEMENT,
+    TX_TYPE_FEE_BORROWING,
+    ZEN_FIELDS,
 )
+from pytz import timezone
+from sol.constants import EXCHANGE_SOLANA_BLOCKCHAIN
+from tabulate import tabulate
 
 
 class Row:
 
-    def __init__(self, timestamp, tx_type, received_amount, received_currency, sent_amount, sent_currency, fee, fee_currency,
-                 exchange, wallet_address, txid, url="", z_index=0, comment=""):
+    def __init__(self, timestamp, tx_type, received_amount, received_currency, sent_amount, sent_currency, fee,
+                 fee_currency, exchange, wallet_address, txid, url="", z_index=0, comment=""):
         self.timestamp = timestamp
         self.tx_type = tx_type
         self.received_amount = self._format_amount(received_amount)
@@ -119,6 +151,32 @@ class Exporter:
 
         return tabulate(table)
 
+    def export_format(self, format, csvpath):
+        if format == FORMAT_DEFAULT:
+            self.export_default_csv(csvpath)
+        elif format == FORMAT_BALANCES:
+            self.export_balances_csv(csvpath)
+        elif format == FORMAT_COINTRACKING:
+            self.export_cointracking_csv(csvpath)
+        elif format == FORMAT_COINTRACKER:
+            self.export_cointracker_csv(csvpath)
+        elif format == FORMAT_KOINLY:
+            self.export_koinly_csv(csvpath)
+        elif format == FORMAT_CRYPTOTAXCALCULATOR:
+            self.export_calculator_csv(csvpath)
+        elif format == FORMAT_ACCOINTING:
+            self.export_accointing_csv(csvpath)
+            xlsxpath = csvpath.replace(".csv", ".xlsx")
+            self.convert_csv_to_xlsx(csvpath, xlsxpath)
+            return xlsxpath
+        elif format == FORMAT_TOKENTAX:
+            self.export_tokentax_csv(csvpath)
+        elif format == FORMAT_ZENLEDGER:
+            self.export_zenledger_csv(csvpath)
+        elif format == FORMAT_TAXBIT:
+            self.export_taxbit_csv(csvpath)
+        return csvpath
+
     def export_default_csv(self, csvpath=None, truncate=0):
         self.sort_rows(reverse=True)
 
@@ -130,7 +188,7 @@ class Exporter:
             table.extend([row.as_array() for row in rows])
 
         if csvpath:
-            with open(csvpath, 'w') as f:
+            with open(csvpath, 'w', newline='', encoding='utf-8') as f:
                 mywriter = csv.writer(f)
                 mywriter.writerows(table)
                 logging.info("Wrote to %s", csvpath)
@@ -148,17 +206,20 @@ class Exporter:
             TX_TYPE_AIRDROP: "Airdrop",
             TX_TYPE_STAKING: "Staking",
             TX_TYPE_TRADE: "Trade",
-            TX_TYPE_TRANSFER: "Transfer",
+            TX_TYPE_TRANSFER: TX_TYPE_TRANSFER,
             TX_TYPE_INCOME: "Income",
             TX_TYPE_SPEND: "Spend",
-            TX_TYPE_BORROW: "Transfer",
-            TX_TYPE_REPAY: "Transfer"
+            TX_TYPE_BORROW: "Income (non taxable)",
+            TX_TYPE_REPAY: "Expense (non taxable)",
+            TX_TYPE_FEE: "Other Fee",
+            TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
+            TX_TYPE_FEE_BORROWING: "Borrowing Fee",
         }
 
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -166,29 +227,36 @@ class Exporter:
 
             # data rows
             for row in rows:
-                tx_type = cointracking_types[row.tx_type]
-                if tx_type == "Transfer":
+                # Determine type
+                ct_type = cointracking_types[row.tx_type]
+                if ct_type == TX_TYPE_TRANSFER:
                     if row.received_amount and not row.sent_amount:
-                        tx_type = "Deposit"
+                        ct_type = "Deposit"
                     elif row.sent_amount and not row.received_amount:
-                        tx_type = "Withdrawal"
+                        ct_type = "Withdrawal"
                     else:
-                        tx_type = "Deposit"
+                        ct_type = "Deposit"
                         logging.error("Bad condition in export_cointracking_csv(): {}, {}, {}".format(
                             row.received_amount, row.sent_amount, row.as_array()))
 
+                # id that determines duplicates
                 txid_cointracking = str(row.txid) + "." + str(row.received_currency) + "." + str(row.sent_currency)
 
+                # add txid to comment, as helpful info in cointracking UI
                 if row.comment:
                     comment = "{} {}".format(row.comment, row.txid)
                 else:
                     comment = row.txid
 
+                # Adjust amount(s) for fee according to cointracking spec
+                # https://cointracking.freshdesk.com/en/support/solutions/articles/29000007202-entering-fees
+                adj_sent_amount, adj_received_amount, other_fee_line = self._cointracking_fee_adjustments(ct_type, row, comment)
+
                 line = [
-                    tx_type,                                             # "Staking" | "Airdrop" | "Trade
-                    row.received_amount,                                 # Buy Amount
+                    ct_type,                                             # "Staking" | "Airdrop" | "Trade
+                    adj_received_amount,                                 # Buy Amount
                     self._cointracking_code(row.received_currency),      # Buy Currency
-                    row.sent_amount,                                     # Sell Amount
+                    adj_sent_amount,                                     # Sell Amount
                     self._cointracking_code(row.sent_currency),          # Sell Currency
                     row.fee,                                             # Fee
                     self._cointracking_code(row.fee_currency),           # Fee Currency
@@ -200,7 +268,45 @@ class Exporter:
                 ]
                 mywriter.writerow(line)
 
+                if other_fee_line:
+                    mywriter.writerow(other_fee_line)
+
         logging.info("Wrote to %s", csvpath)
+
+    def _cointracking_fee_adjustments(self, ct_type, row, comment):
+        if not row.fee:
+            return row.sent_amount, row.received_amount, None
+        elif "multicurrency fee" in comment:
+            return row.sent_amount, row.received_amount, None
+        elif ct_type == "Deposit" and row.tx_type != TX_TYPE_BORROW:
+            return row.sent_amount, row.received_amount, None
+        elif row.received_amount and row.received_currency == row.fee_currency:
+            # adjust received amount
+            return row.sent_amount, float(row.received_amount) - float(row.fee), None
+        elif row.sent_amount and row.sent_currency == row.fee_currency:
+            # adjust sent amount
+            return float(row.sent_amount) + float(row.fee), row.received_amount, None
+        elif row.fee and row.fee_currency not in (row.received_currency, row.sent_currency):
+            # other currency fee case: add csv "Other Fee" row
+            txid_other_fee = str(row.txid) + ".fee"
+            other_fee_line = [
+                "Other Fee",
+                "",                                            # Buy Amount
+                "",                                            # Buy Currency
+                row.fee,                                       # Sell Amount
+                self._cointracking_code(row.fee_currency),     # Sell Currency
+                "",                                            # Fee
+                "",                                            # Fee Currency
+                row.exchange,                                  # Exchange
+                row.wallet_address,                            # Trade-Group
+                "fee for {}".format(row.txid),                 # Comment
+                row.timestamp,                                 # Date
+                txid_other_fee                                 # Tx-ID
+            ]
+            return row.sent_amount, row.received_amount, other_fee_line
+        else:
+            logging.critical("Bad condition in _cointracking_fee_adjustments(): unable to handle txid=%s", row.txid)
+            return row.sent_amount, row.received_amount, None
 
     def export_tokentax_csv(self, csvpath):
         """ Write CSV, suitable for import into TokenTax """
@@ -218,7 +324,7 @@ class Exporter:
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -226,6 +332,7 @@ class Exporter:
 
             # data rows
             for row in rows:
+                # Determine tx_type
                 tx_type = tokentax_types[row.tx_type]
                 if tx_type == "Transfer":
                     if row.received_amount and not row.sent_amount:
@@ -275,7 +382,7 @@ class Exporter:
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -305,7 +412,7 @@ class Exporter:
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -363,7 +470,7 @@ class Exporter:
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -447,7 +554,7 @@ class Exporter:
         self.sort_rows(reverse=True)
 
         rows = self._rows_export()
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -528,7 +635,7 @@ class Exporter:
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
@@ -565,13 +672,6 @@ class Exporter:
         logging.info("Wrote to %s", csvpath)
 
     def export_taxbit_csv(self, csvpath):
-        """
-        This is experimental non-working version of TaxBit CSV
-
-        I tried integration to TaxBit website, but there were some unresolved errors.  Some transactions
-        succeeded, but others did not.  CSV imports fail silently, and support did not provide any feedback.
-        So this is only a draft implementation according to the website spec.
-        """
         self.sort_rows(reverse=True)
         rows = self._rows_export()
 
@@ -586,23 +686,29 @@ class Exporter:
             TX_TYPE_REPAY: "Transfer Unknown"
         }
 
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
             mywriter.writerow(TAXBIT_FIELDS)
 
             # data rows
+
             if self.wallet_address.startswith("cosmo"):
                 tx_source = "ATOM WALLET"
             elif self.wallet_address.startswith("terra"):
                 tx_source = "LUNA WALLET"
             elif self.wallet_address.startswith("osmo"):
                 tx_source = "OSMO WALLET"
-            elif len(self.wallet_address) == 44:
-                tx_source = "SOL WALLET"
             else:
-                logging.critical("Bad condition: unable to identify tx_source in export_taxbit_csv()")
+                exchange = self.rows[0].exchange if len(self.rows) else ""
+                if exchange == EXCHANGE_SOLANA_BLOCKCHAIN:
+                    tx_source = "SOL WALLET"
+                elif exchange == EXCHANGE_ALGORAND_BLOCKCHAIN:
+                    tx_source = "ALGO WALLET"
+                else:
+                    tx_source = ""
+                    logging.critical("Bad condition: unable to identify tx_source in export_taxbit_csv()")
 
             for row in rows:
                 # Determine Transaction Type
@@ -636,7 +742,7 @@ class Exporter:
                     raise Exception("Bad condition: unable to determined tb_type for txid {}".format(row.txid))
 
                 # Create an ID that determines duplicates
-                exchange_transaction_id = "{}_{}_{}".format(row.txid, row.sent_currency, row.received_currency)
+                exchange_transaction_id = "{}.{}.{}".format(row.txid, row.sent_currency, row.received_currency)
 
                 line = [
                     self._taxbit_timestamp(row.timestamp),       # Date and Time
@@ -682,14 +788,52 @@ class Exporter:
         return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _cointracking_code(self, currency):
+        # Terra
         if currency == "ANC":
             return "ANC2"
         if currency == "LUNA":
             return "LUNA2"
         if currency == "MIR":
             return "MIR2"
+        if currency == "MINE":
+            return "MINE2"
         if currency == "SOL":
             return "SOL2"
+        if currency == "ASTRO":
+            return "ASTRO5"
+        if currency == "BETH":
+            return "BETH3"
+        if currency == "Psi":
+            return "PSI2"
+        if currency == "ORION":
+            return "ORION2"
+        if currency == "WHALE":
+            return "WHALE3"
+        if currency == "PLY":
+            return "PLY3"
+        if currency == "TWD":
+            return "TWD2"
+        if currency == "GLOW":
+            return "GLOW3"
+        # Terra: stablecoins to currency to track correct value
+        if currency == "SGT":
+            return "SGD"
+        if currency == "SET":
+            return "SEK"
+        if currency == "INT":
+            return "INR"
+        if currency == "CNT":
+            return "CNY"
+        if currency == "CAT":
+            return "CAD"
+        if currency == "wtUST":
+            return "UST3"
+        # todo this does not exist event as currency
+        if currency == "MNT":
+            return "MNT2"
+        # Cosmos
+        if currency == "ATOM":
+            return "ATOM2"
         return currency
 
     def _cointracker_code(self, currency):
@@ -749,7 +893,7 @@ class Exporter:
         table.insert(0, header_row)
 
         # Write table array to csv
-        with open(csvpath, 'w') as f:
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
             mywriter.writerows(table)
             logging.info("Wrote to %s", csvpath)

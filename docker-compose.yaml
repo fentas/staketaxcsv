@@ -1,0 +1,70 @@
+version: '3.7'
+
+services:
+  dynamodb:
+    image:  amazon/dynamodb-local
+    hostname: dynamodb
+    # uncomment to make data persistant
+    # command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data/"
+    restart: unless-stopped
+    volumes:
+      - dynamodb-data:/data
+    ports:
+      - "0.0.0.0:8000:8000"
+    networks:
+      - dynamodb
+  
+  dynamodb-admin:
+    image: aaronshaf/dynamodb-admin
+    restart: unless-stopped
+    environment:
+      DYNAMO_ENDPOINT: "http://dynamodb:8000"
+      AWS_REGION: "us-east-1"
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local
+    ports:
+      - "0.0.0.0:8001:8001"
+    networks:
+      - dynamodb
+    depends_on:
+      - dynamodb
+
+  mongo:
+    image: mongo:latest
+    hostname: mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: local
+      MONGO_INITDB_ROOT_PASSWORD: local
+    volumes:
+      - mongo-data:/data/db
+    ports:
+      - "0.0.0.0:27017:27017"
+    networks:
+      - mongo
+
+  mongo-express:
+    image: mongo-express:latest
+    hostname: mongo-express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: local
+      ME_CONFIG_MONGODB_ADMINPASSWORD: local
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: "27017"
+    ports:
+      - "0.0.0.0:8081:8081"
+    networks:
+      - mongo
+    depends_on:
+      - mongo
+
+networks:
+  dynamodb:
+    name: dynamodb
+  mongo:
+    name: mongo
+
+volumes:
+  dynamodb-data:
+  mongo-data:

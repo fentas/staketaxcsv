@@ -1,17 +1,22 @@
-
-
 import logging
-from common.TxInfo import TxInfo
-from common.ErrorCounter import ErrorCounter
-from settings_csv import TICKER_ATOM
-
 from datetime import datetime
-from common.ExporterTypes import TX_TYPE_UNKNOWN, TX_TYPE_STAKING_DELEGATE, TX_TYPE_STAKING_UNDELEGATE, \
-    TX_TYPE_STAKING_REDELEGATE, TX_TYPE_VOTE
-from atom.make_tx import make_transfer_receive_tx, make_atom_reward_tx
-from common.make_tx import make_simple_tx, make_transfer_out_tx
-from atom.constants import MILLION, CURRENCIES, CUR_ATOM, EXCHANGE_COSMOS_BLOCKCHAIN
+
 from atom.config_atom import localconfig
+from atom.constants import CHAIN_ID_COSMOHUB3, CHAIN_ID_COSMOHUB4, CUR_ATOM, CURRENCIES, MILLION
+from atom.make_tx import make_atom_reward_tx, make_transfer_receive_tx
+
+# from common.TxInfo import TxInfo
+from atom.TxInfoAtom import TxInfoAtom
+from common.ErrorCounter import ErrorCounter
+from common.ExporterTypes import (
+    TX_TYPE_STAKING_DELEGATE,
+    TX_TYPE_STAKING_REDELEGATE,
+    TX_TYPE_STAKING_UNDELEGATE,
+    TX_TYPE_UNKNOWN,
+    TX_TYPE_VOTE,
+)
+from common.make_tx import make_simple_tx, make_transfer_out_tx
+from settings_csv import TICKER_ATOM
 
 
 def process_txs(wallet_address, elems, exporter):
@@ -23,19 +28,19 @@ def process_txs(wallet_address, elems, exporter):
 def process_tx(wallet_address, elem, exporter):
     txid = elem["txhash"]
 
-    timestamp = datetime.strptime(
-        elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
-    fee = _get_fee(elem)
+    chain_id = CHAIN_ID_COSMOHUB3 if "value" in elem["tx"] else CHAIN_ID_COSMOHUB4
+    timestamp = datetime.strptime(elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+    fee = _get_fee(elem, chain_id)
     url = "https://www.mintscan.io/cosmos/txs/{}".format(txid)
 
-    msg_types = _msg_types(elem)
+    msg_types = _msg_types(elem, chain_id)
     for i in range(0, len(msg_types)):
         msg_type = msg_types[i]
 
-        # Make new unique TxInfo for each message
+        # Make new unique TxInfoAtom for each message
         cur_txid = "{}-{}".format(txid, i)
         cur_fee = fee if i == 0 else ""
-        txinfo = TxInfo(cur_txid, timestamp, cur_fee, CUR_ATOM, wallet_address, EXCHANGE_COSMOS_BLOCKCHAIN, url)
+        txinfo = TxInfoAtom(cur_txid, timestamp, cur_fee, wallet_address, url, chain_id)
 
         try:
             _handle_tx(msg_type, exporter, txinfo, elem, txid, i)
@@ -44,13 +49,13 @@ def process_tx(wallet_address, elem, exporter):
             handle_simple_tx(exporter, txinfo, TX_TYPE_UNKNOWN)
 
             if localconfig.debug:
-                raise(e)
+                raise (e)
 
 
 def _handle_tx(msg_type, exporter, txinfo, elem, txid, i):
     if msg_type == "MsgSend":
         handle_transfer(exporter, txinfo, elem, i)
-    elif msg_type == "MsgWithdrawDelegatorReward":
+    elif msg_type in ("MsgWithdrawDelegatorReward", "MsgWithdrawDelegationReward"):
         handle_withdraw_reward(exporter, txinfo, elem, i)
     elif msg_type in ["MsgDelegate", "MsgUndelegate", "MsgBeginRedelegate"]:
         handle_del_reward(exporter, txinfo, elem, i, msg_type)
@@ -62,12 +67,12 @@ def _handle_tx(msg_type, exporter, txinfo, elem, txid, i):
     elif msg_type == "MsgRecvPacket":
         try:
             handle_transfer_ibc_recv(exporter, txinfo, elem, i)
-        except Exception as e:
+        except Exception:
             handle_unknown(exporter, txinfo)
     elif msg_type == "MsgTransfer":
         try:
             handle_transfer_ibc(exporter, txinfo, elem, i)
-        except Exception as e:
+        except Exception:
             handle_unknown(exporter, txinfo)
     else:
         logging.error("Unknown msg_type=%s", msg_type)
@@ -97,7 +102,7 @@ def handle_del_reward(exporter, txinfo, elem, msg_index, msg_type):
         return
 
     # Use transfer events secondarily
-    transfers_in, _ = _extract_transfers(events, wallet_address, txid)
+    transfers_in, _ = _extract_transfers(txinfo, events, wallet_address, txid)
     if transfers_in:
         for amount, currency, _, _ in transfers_in:
             row = make_atom_reward_tx(txinfo, amount)
@@ -118,7 +123,7 @@ def handle_transfer_ibc(exporter, txinfo, elem, msg_index):
     txid = txinfo.txid
 
     events = elem["logs"][msg_index]["events"]
-    transfers_in, transfers_out = _extract_transfers(events, wallet_address, txid)
+    transfers_in, transfers_out = _extract_transfers(txinfo, events, wallet_address, txid)
 
     _handle_transfers(exporter, txinfo, transfers_in, transfers_out)
 
@@ -128,7 +133,7 @@ def handle_transfer_ibc_recv(exporter, txinfo, elem, msg_index):
     wallet_address = txinfo.wallet_address
 
     events = elem["logs"][msg_index]["events"]
-    transfers_in, transfers_out = _extract_transfers(events, wallet_address, txid)
+    transfers_in, transfers_out = _extract_transfers(txinfo, events, wallet_address, txid)
 
     _handle_transfers(exporter, txinfo, transfers_in, transfers_out)
 
@@ -138,7 +143,7 @@ def handle_transfer(exporter, txinfo, elem, msg_index):
     txid = txinfo.txid
 
     events = elem["logs"][msg_index]["events"]
-    transfers_in, transfers_out = _extract_transfers(events, wallet_address, txid)
+    transfers_in, transfers_out = _extract_transfers(txinfo, events, wallet_address, txid)
 
     _handle_transfers(exporter, txinfo, transfers_in, transfers_out)
 
@@ -158,11 +163,15 @@ def handle_withdraw_reward(exporter, txinfo, elem, msg_index):
     events = elem["logs"][msg_index]["events"]
     reward = _extract_withdraw_rewards(events, txid)
 
-    row = make_atom_reward_tx(txinfo, reward)
-    exporter.ingest_row(row)
+    if reward:
+        row = make_atom_reward_tx(txinfo, reward)
+        exporter.ingest_row(row)
 
 
-def _extract_transfers(events, wallet_address, txid):
+def _extract_transfers(txinfo, events, wallet_address, txid):
+    if txinfo.chain_id == CHAIN_ID_COSMOHUB3:
+        return _extract_transfers_cosmoshub3(events, wallet_address, txid)
+
     transfers_in = []
     transfers_out = []
 
@@ -175,11 +184,31 @@ def _extract_transfers(events, wallet_address, txid):
                 amount_string = attributes[i + 2]["value"]
 
                 if recipient == wallet_address:
-                    amount, currency = _amount(amount_string, events)
+                    amount, currency = _amount(amount_string)
                     transfers_in.append([amount, currency, sender, recipient])
                 elif sender == wallet_address:
-                    amount, currency = _amount(amount_string, events)
+                    amount, currency = _amount(amount_string)
                     transfers_out.append([amount, currency, sender, recipient])
+
+    return transfers_in, transfers_out
+
+
+def _extract_transfers_cosmoshub3(events, wallet_address, txid):
+    transfers_in = []
+    transfers_out = []
+
+    for event in events:
+        if event["type"] == "transfer":
+            attributes = event["attributes"]
+            for i in range(0, len(attributes), 2):
+                amount_string = attributes[i + 1]["value"]
+                amount, currency = _amount(amount_string)
+
+                k1, v1 = attributes[i]["key"], attributes[i]["value"]
+                if k1 == "sender" and v1 == wallet_address:
+                    transfers_out.append([amount, currency, wallet_address, ""])
+                elif k1 == "recipient" and v1 == wallet_address:
+                    transfers_in.append([amount, currency, "", wallet_address])
 
     return transfers_in, transfers_out
 
@@ -190,8 +219,12 @@ def _extract_withdraw_rewards(events, txid):
             attributes = event["attributes"]
             for kv in attributes:
                 if kv["key"] == "amount":
-                    amount_string = kv["value"]
-                    return _atom(amount_string)
+                    if "value" in kv:
+                        amount_string = kv["value"]
+                        return _atom(amount_string)
+                    else:
+                        # Missing value means reward of zero (as opposed to can't find)
+                        return 0
 
     return None
 
@@ -201,11 +234,11 @@ def _atom(uatom):
     Example: '5340003uatom' -> 5.340003
     """
     amount, currency = _amount(uatom)
-    assert(currency == CUR_ATOM)
+    assert currency == CUR_ATOM
     return amount
 
 
-def _amount(amount_string, events=None):
+def _amount(amount_string):
     """
     Example: '5340003uatom' -> 5.340003
     """
@@ -226,28 +259,50 @@ def _amount(amount_string, events=None):
     return amount, currency
 
 
-def _get_fee(elem):
+def _get_fee(elem, chain_id):
+    if chain_id == CHAIN_ID_COSMOHUB3:
+        return _get_fee_cosmoshub3(elem)
+
     amount_list = elem["tx"]["auth_info"]["fee"]["amount"]
     if len(amount_list) == 0:
         return 0
 
-    amount_dict = amount_list[0]
-    denom = amount_dict["denom"]
-    amount = amount_dict["amount"]
-
+    denom = amount_list[0]["denom"]
+    amount_string = amount_list[0]["amount"]
     if denom != "uatom":
-        raise Exception("Unexpected denom.  amount_dict=%s".format(amount_dict))
-    fee = float(amount) / MILLION
+        raise Exception(f"Unexpected denom. denom={denom}")
+    fee = float(amount_string) / MILLION
     return fee
 
 
-def _msg_types(elem):
-    """ Returns list of @type values found in tx.body.messages """
+def _get_fee_cosmoshub3(elem):
+    # legacy cosmohub3 format
+    amount_string = elem["tx"]["value"]["fee"]["amount"][0]["amount"]
+    fee = float(amount_string) / MILLION
+    return fee
+
+
+def _msg_types(elem, chain_id):
+    """Returns list of @type values found in tx.body.messages"""
+    if chain_id == CHAIN_ID_COSMOHUB3:
+        return _msg_types_cosmohub3(elem)
+
     types = [msg["@type"] for msg in elem["tx"]["body"]["messages"]]
 
     # Simply to last word (i.e. /cosmos.distribution.v1beta1.MsgWithdrawDelegatorReward -> MsgWithdrawDelegatorReward)
     out = []
     for t in types:
         lastfield = t.split(".")[-1]
+        out.append(lastfield)
+    return out
+
+
+def _msg_types_cosmohub3(elem):
+    # legacy cosmoshub3 format (i.e. cosmos-sdk/MsgWithdrawDelegationReward -> MsgWithdrawDelegationReward)
+    types = [msg["type"] for msg in elem["tx"]["value"]["msg"]]
+
+    out = []
+    for t in types:
+        lastfield = t.split("/")[-1]
         out.append(lastfield)
     return out

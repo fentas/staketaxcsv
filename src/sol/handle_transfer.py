@@ -1,8 +1,13 @@
-
-from common.make_tx import make_transfer_out_tx, make_transfer_in_tx
-from sol.constants import (
-    DIRECTION_INBOUND, DIRECTION_OUTBOUND, INSTRUCT_TRANSFERCHECK, INSTRUCT_TRANSFERCHECKED, MINT_SOL)
+from common.make_tx import make_transfer_in_tx, make_transfer_out_tx, make_transfer_self
 from sol import util_sol
+from sol.constants import (
+    DIRECTION_INBOUND,
+    DIRECTION_OUTBOUND,
+    DIRECTION_SELF,
+    INSTRUCT_TRANSFERCHECK,
+    INSTRUCT_TRANSFERCHECKED,
+    MINT_SOL,
+)
 
 
 def is_transfer(txinfo):
@@ -34,6 +39,9 @@ def handle_transfer(exporter, txinfo):
     elif direction == DIRECTION_INBOUND:
         row = make_transfer_in_tx(txinfo, amount, currency)
         exporter.ingest_row(row)
+    elif direction == DIRECTION_SELF:
+        row = make_transfer_self(txinfo)
+        exporter.ingest_row(row)
     else:
         raise Exception("Bad condition in handle_transfer()", txid, direction)
 
@@ -57,6 +65,9 @@ def _get_transfer(txinfo):
                 source = info.get("source", None)
                 destination = info.get("destination", None)
 
+                if source is not None and source == destination:
+                    # wallet transfering to self
+                    return "", "", DIRECTION_SELF, destination
                 if amount_string == "0":
                     continue
 

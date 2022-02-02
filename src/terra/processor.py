@@ -1,46 +1,61 @@
-
 import logging
-import pprint
 from datetime import datetime
 
 import terra.execute_type as ex
-from terra.constants import CONTRACTS_LOTA, EXCHANGE_TERRA_BLOCKCHAIN, CONTRACT_RANDOMEARTH
+from common.ErrorCounter import ErrorCounter
+from common.ExporterTypes import TX_TYPE_GOV, TX_TYPE_LOTA_UNKNOWN, TX_TYPE_VOTE
+from common.make_tx import make_just_fee_tx
+from common.TxInfo import TxInfo
 from terra import util_terra
-from terra.handle_governance import (
-    handle_governance_stake, handle_governance_unstake, handle_governance_reward)
+from terra.config_terra import localconfig
+from terra.constants import CONTRACT_RANDOMEARTH, CONTRACTS_LOTA, EXCHANGE_TERRA_BLOCKCHAIN
+from terra.handle_anchor_bond import handle_bond, handle_unbond, handle_unbond_withdraw
+from terra.handle_anchor_borrow import (
+    handle_borrow,
+    handle_deposit_collateral,
+    handle_repay,
+    handle_withdraw_collateral,
+)
+from terra.handle_anchor_earn import handle_anchor_earn_deposit, handle_anchor_earn_withdraw
+from terra.handle_failed_tx import handle_failed_tx
+from terra.handle_governance import handle_governance_reward, handle_governance_stake, handle_governance_unstake
 from terra.handle_lp import (
-    handle_lp_deposit, handle_lp_withdraw, handle_lp_stake, handle_lp_unstake, handle_lp_long_farm,
-    handle_lp_deposit_idx, handle_lp_withdraw_idx, handle_lp_stake_deposit_strategy,
-    handle_lp_unstake_withdraw_from_strategy
+    handle_lp_deposit,
+    handle_lp_deposit_idx,
+    handle_lp_long_farm,
+    handle_lp_stake,
+    handle_lp_stake_deposit_strategy,
+    handle_lp_unstake,
+    handle_lp_unstake_withdraw_from_strategy,
+    handle_lp_withdraw,
+    handle_lp_withdraw_idx,
 )
 from terra.handle_mirror_borrow import handle_deposit_borrow, handle_repay_withdraw
+from terra.handle_nft import (
+    handle_accept_deposit,
+    handle_add_to_deposit,
+    handle_add_whitelist,
+    handle_approve,
+    handle_execute_order,
+    handle_mint_nft,
+    handle_purchase_nft,
+    handle_reserve_nft,
+    handle_send_nft,
+    handle_transfer_nft,
+    handle_withdraw,
+)
 from terra.handle_reward import handle_reward
 from terra.handle_reward_contract import handle_airdrop, handle_reward_contract
-from terra.handle_transfer import handle_transfer, handle_transfer_contract
-from terra.handle_simple import handle_unknown, handle_simple, handle_unknown_detect_transfers
-from terra.handle_swap import handle_swap, handle_swap_msgswap, handle_execute_swap_operations
-from terra.handle_anchor_earn import handle_anchor_earn_deposit, handle_anchor_earn_withdraw
-from terra.handle_anchor_borrow import (
-    handle_borrow, handle_repay, handle_deposit_collateral, handle_withdraw_collateral)
-from terra.handle_anchor_bond import handle_bond, handle_unbond, handle_unbond_withdraw
-from common.ExporterTypes import TX_TYPE_VOTE, TX_TYPE_GOV, TX_TYPE_LOTA_UNKNOWN
-from common.ErrorCounter import ErrorCounter
-from common.TxInfo import TxInfo
-from common.make_tx import make_just_fee_tx
-from terra.handle_nft import (
-    handle_add_whitelist, handle_reserve_nft, handle_mint_nft, handle_purchase_nft, handle_execute_order,
-    handle_transfer_nft, handle_approve, handle_withdraw, handle_add_to_deposit, handle_accept_deposit,
-    handle_send_nft
-)
 from terra.handle_reward_pylon import handle_airdrop_pylon
-from terra.handle_failed_tx import handle_failed_tx
-from terra.config_terra import localconfig
+from terra.handle_simple import handle_simple, handle_unknown, handle_unknown_detect_transfers
+from terra.handle_swap import handle_execute_swap_operations, handle_swap, handle_swap_msgswap
+from terra.handle_transfer import handle_transfer, handle_transfer_bridge_wormhole, handle_transfer_contract
 from terra.handle_zap import handle_zap_into_strategy, handle_zap_out_of_strategy
 
 # execute_type -> tx_type mapping for generic transactions with no tax details
 EXECUTE_TYPES_SIMPLE = {
     ex.EXECUTE_TYPE_CAST_VOTE: TX_TYPE_VOTE,
-    ex.EXECUTE_TYPE_REGISTER: TX_TYPE_LOTA_UNKNOWN
+    ex.EXECUTE_TYPE_REGISTER: TX_TYPE_LOTA_UNKNOWN,
 }
 
 
@@ -144,6 +159,19 @@ def process_tx(wallet_address, elem, exporter):
             elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
                 return handle_governance_reward(exporter, elem, txinfo)
 
+# non found
+# terra1mtwph2juhj0rvjz7dy92gvl6xvukaxu8rfv8ts -- bluna hub
+# terra1fxwelge6mf5l6z0rjpylzcfq9w9tw2q7tewaf5 -- spec staking
+
+# loookup found
+# terra1s5eczhe0h0jutf46re52x5z4r03c8hupacxmdr -- spec token
+# terra15gwkyepfc6xgca5t5zefzwy42uts8l2m4g40k6 -- mir
+# terra14y5affaarufk3uscy2vr6pe6w6zqf2wpjzn5sh -- mtsla
+# terra14z56l0fp2lsf86zy3hty2z47ezkhnthtr9yq76 -- anc
+# terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy -- mine
+# terra1dy9kmlm4anr92e42mrkjwzyvfqwz66un00rwr5 -- vkr
+# 
+
             # Anchor Borrow Transactions
             elif execute_type == ex.EXECUTE_TYPE_BORROW_STABLE:
                 return handle_borrow(exporter, elem, txinfo)
@@ -206,6 +234,14 @@ def process_tx(wallet_address, elem, exporter):
             elif execute_type == ex.EXECUTE_TYPE_ZAP_OUT_OF_STRATEGY:
                 return handle_zap_out_of_strategy(exporter, elem, txinfo)
 
+            # Bridge transfers
+            elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_TOKENS:
+                # wormhole bridge: transfer out
+                return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
+            elif execute_type == ex.EXECUTE_TYPE_SUBMIT_VAA:
+                # wormhole bridge: transfer in
+                return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
+
             else:
                 logging.error("Unknown execute_type for txid=%s", txid)
                 ErrorCounter.increment("unknown_execute_type", txid)
@@ -220,28 +256,25 @@ def process_tx(wallet_address, elem, exporter):
         ErrorCounter.increment("exception", txid)
         handle_unknown(exporter, txinfo)
 
-        # roger
         if localconfig.debug:
-            raise(e)
+            raise (e)
 
 
 def _txinfo(exporter, elem, wallet_address):
     txid = elem["txhash"]
     logging.debug("process_tx() txid=%s", txid)
 
-    timestamp = datetime.strptime(
-        elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.strptime(elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
     fee, fee_currency, more_fees = _get_fee(elem)
     url = "https://finder.terra.money/mainnet/tx/{}".format(txid)
     txinfo = TxInfo(txid, timestamp, fee, fee_currency, wallet_address, EXCHANGE_TERRA_BLOCKCHAIN, url)
     msgtype = _get_first_msgtype(elem)
 
     # Handle transaction with multi-currency fee (treat as "spend" transactions)
-    if more_fees:
-        for cur_fee, cur_currency in more_fees:
-            row = make_just_fee_tx(txinfo, cur_fee, cur_currency)
-            row.comment = "multicurrency fee"
-            exporter.ingest_row(row)
+    for cur_fee, cur_currency in more_fees:
+        row = make_just_fee_tx(txinfo, cur_fee, cur_currency)
+        row.comment = "multicurrency fee"
+        exporter.ingest_row(row)
 
     return msgtype, txinfo
 
@@ -251,7 +284,7 @@ def _get_fee(elem):
 
     # Handle special case for old transaction (16421CD60E56DA4F859088B7CA87BCF05A3B3C3F56CD4C0B2528EE0A797CC22D)
     if len(amounts) == 0:
-        return 0, "", None
+        return 0, "", []
 
     # Parse fee element
     denom = amounts[0]["denom"]
@@ -273,9 +306,9 @@ def _get_fee(elem):
 
         # Special case for old col-3 transaction 7F3F1FA8AC89824B64715FEEE057273A873F240CA9A50BC4A87EEF4EE9813905
         if fee == 0:
-            return 0, ""
+            return 0, "", []
 
-        return fee, currency, None
+        return fee, currency, []
     else:
         # multi-currency fee
         more_fees = []
@@ -290,5 +323,5 @@ def _get_fee(elem):
 
 
 def _get_first_msgtype(elem):
-    """ Returns type identifier for this transaction """
+    """Returns type identifier for this transaction"""
     return elem["tx"]["value"]["msg"][0]["type"]

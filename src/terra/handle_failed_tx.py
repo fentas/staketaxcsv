@@ -1,4 +1,3 @@
-
 from common.make_tx import make_spend_tx
 from terra import util_terra
 
@@ -22,7 +21,7 @@ def handle_failed_tx(exporter, elem, txinfo):
             row = make_spend_tx(txinfo, fee_amount, fee_currency)
             exporter.ingest_row(row)
             return
-    except Exception as e:
+    except Exception:
         pass
 
     # Otherwise no transaction (no-op transaction with no fee = no transaction)

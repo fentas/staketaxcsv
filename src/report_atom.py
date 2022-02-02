@@ -1,4 +1,3 @@
-
 """
 usage: python3 report_atom.py <walletaddress> [--format all|cointracking|koinly|..]
 
@@ -7,47 +6,31 @@ Prints transactions and writes CSV(s) to _reports/ATOM*.csv
 
 Notes:
 
-gaiad query txs --home /tmp/.gaia --events message.sender=<wallet_address> \
-      --node https://<RPCURL>:443 --limit 100
-
-gaiad query txs --home /tmp/.gaia --events transfer.recipient=<wallet_address> \
-      --node https://<RPCURL>:443 --limit 100
-
- * The "--home /tmp/.gaia" is required for aws lambda
+https://node.atomscan.com/swagger/
 
 """
 
-from json.decoder import JSONDecodeError
-import logging
-import subprocess
 import json
+import logging
+import math
 import os
 import pprint
-import time
-import math
 
-from common import report_util
-from common.Exporter import Exporter
+import atom.api_cosmostation
+import atom.api_lcd
 import atom.processor
 from atom.config_atom import localconfig
-from settings_csv import TICKER_ATOM, ATOM_NODE
-from atom.ProgressAtom import ProgressAtom
+from atom.progress_atom import ProgressAtom
+from common import report_util
+from common.Exporter import Exporter
+from settings_csv import TICKER_ATOM
 
-LIMIT = 50   # Cannot go more than 100 per query
+LIMIT = 50
 MAX_TRANSACTIONS = 1000
-CHAIN_IDS = ["cosmoshub-4"]
-
-# Required for aws lambda
-HOME = "/tmp/.gaia"
-
-
-def _cmd(s):
-    logging.info(s)
-    return subprocess.getoutput(s)
 
 
 def main():
-    wallet_address, format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args(TICKER_ATOM)
     _read_options(options)
 
     if txid:
@@ -55,150 +38,117 @@ def main():
         exporter.export_print()
     else:
         exporter = txhistory(wallet_address)
-        report_util.run_exports(TICKER_ATOM, wallet_address, exporter, format)
+        report_util.run_exports(TICKER_ATOM, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
-    if options:
-        if options.get("debug") is True:
-            localconfig.debug = True
-        if options.get("limit"):
-            localconfig.limit = options.get("limit")
+    if not options:
+        return
+    report_util.read_common_options(localconfig, options)
+
+    localconfig.legacy = options.get("legacy", False)
+    logging.info("localconfig: %s", localconfig.__dict__)
 
 
 def wallet_exists(wallet_address):
-    line = "gaiad query account {} --home {} --node {} --output json".format(wallet_address, HOME, ATOM_NODE)
-    output_string = _cmd(line)
-    logging.info("json_string: %s", output_string)
-
-    if "pub_key" in output_string:
-        return True
-    else:
-        return False
+    return atom.api_lcd.account_exists(wallet_address)
 
 
 def txone(wallet_address, txid):
-    line = "gaiad query tx {} --home {} --node={} ".format(txid, HOME, ATOM_NODE)
-    line += "| python -c 'import sys, yaml, json; json.dump(yaml.load(sys.stdin, Loader=yaml.FullLoader), sys.stdout, indent=4)'"
-    json_string = _cmd(line)
-    data = json.loads(json_string)
+    if localconfig.legacy:
+        elem = atom.api_cosmostation.get_tx(txid)
+    else:
+        elem = atom.api_lcd.get_tx(txid)
 
     print("Transaction data:")
-    pprint.pprint(data)
+    pprint.pprint(elem)
 
     exporter = Exporter(wallet_address)
-    atom.processor.process_tx(wallet_address, data, exporter)
+    atom.processor.process_tx(wallet_address, elem, exporter)
     return exporter
 
 
-def txhistory(wallet_address, job=None):
+def txhistory(wallet_address, job=None, options=None):
+    progress = ProgressAtom()
+    exporter = Exporter(wallet_address)
+
+    if options:
+        _read_options(options)
     if job:
         localconfig.job = job
 
     # Fetch count of transactions to estimate progress more accurately
-    progress = ProgressAtom()
-    progress.report_message("Fetching counts...")
-    pages = _count_txs(wallet_address)
-    progress.set_estimate(pages)
-    logging.info("num_pages:%s, pages: %s", len(pages), pages)
+    count_pages = atom.api_lcd.get_txs_count_pages(wallet_address)
+    progress.set_estimate(count_pages)
+
+    # Fetch legacy transactions conditionally (cosmoshub-3)
+    elems = []
+    if localconfig.legacy:
+        elems.extend(_fetch_txs_legacy(wallet_address, progress))
 
     # Fetch transactions
-    elems = _fetch_txs(wallet_address, pages, progress)
-    progress.report_message("Processing {} ATOM transactions... ".format(len(elems)))
+    elems.extend(_fetch_txs(wallet_address, progress, count_pages))
+    elems = _remove_duplicates(elems)
 
-    exporter = Exporter(wallet_address)
+    progress.report_message(f"Processing {len(elems)} ATOM transactions... ")
     atom.processor.process_txs(wallet_address, elems, exporter)
 
     return exporter
 
 
-def _query_blockchain(wallet_address, limit, page, chain_id, sender=True):
-    """ Query terra blockchain for transactions as sender and receiver.  Get json response.  """
-
-    if sender:
-        events = "message.sender={}".format(wallet_address)
-    else:
-        events = "transfer.recipient={}".format(wallet_address)
-
-    line = "gaiad query txs --events '{}' ".format(events)
-    line += "--limit {} --node '{}' --page {} --chain-id '{}' --home {} ".format(limit, ATOM_NODE, page, chain_id, HOME)
-    line += "| python3 -c 'import sys, yaml, json; json.dump(yaml.load(sys.stdin, Loader=yaml.FullLoader), sys.stdout, indent=4)'"
-
-    # Run query
-    json_string = _cmd(line)
-
-    try:
-        data = json.loads(json_string)
-    except JSONDecodeError as e:
-        time.sleep(5)
-        logging.info("Failed query.  Retrying once... json_string=%s", json_string)
-        # Retry once.
-        json_string = _cmd(line)
-        data = json.loads(json_string)
-
-    time.sleep(5)
-    return data
-
-
-def _count_txs(wallet_address):
-    pages = []
-    for chain_id in CHAIN_IDS:
-
-        sender = True
-        data = _query_blockchain(wallet_address, 10, 1, chain_id, sender)
-        page_nums = _pages(data)
-        for page_num in page_nums:
-            pages.append((chain_id, page_num, sender))
-
-        sender = False
-        data = _query_blockchain(wallet_address, 10, 1, chain_id, sender)
-        page_nums = _pages(data)
-        for page_num in page_nums:
-            pages.append((chain_id, page_num, sender))
-
-    return pages
-
-
 def _max_pages():
-    max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
+    max_txs = localconfig.limit if localconfig.limit is not None else MAX_TRANSACTIONS
     max_pages = math.ceil(max_txs / LIMIT)
     logging.info("max_txs: %s, max_pages: %s", max_txs, max_pages)
     return max_pages
 
 
-def _pages(data):
-    count = int(data["total_count"])
-    page_total = int((count - 1) / LIMIT) + 1
-    page_min = max(page_total - _max_pages() + 1, 1)
-    pages = list(range(page_min, page_total + 1))
-    return pages
+def _fetch_txs_legacy(wallet_address, progress):
+    out = []
+    next_id = None
+    current_page = 0
+
+    for _ in range(0, _max_pages()):
+        message = f"Fetching page {current_page} for legacy transactions ..."
+        progress.report_message(message)
+        current_page += 1
+
+        elems, next_id = atom.api_cosmostation.get_txs_legacy(wallet_address, next_id)
+        out.extend(elems)
+        if next_id is None:
+            break
+
+    return out
 
 
-def _fetch_txs(wallet_address, pages, progress):
-    # Debugging only
-    DEBUG_FILE = "_reports/testatom.{}.json".format(wallet_address)
-    if localconfig.debug and os.path.exists(DEBUG_FILE):
-        with open(DEBUG_FILE, 'r') as f:
-            out = json.load(f)
-            return out
+def _fetch_txs(wallet_address, progress, num_pages):
+    if localconfig.debug:
+        debug_file = f"_reports/testatom.{wallet_address}.json"
+        if os.path.exists(debug_file):
+            with open(debug_file, "r") as f:
+                return json.load(f)
 
     out = []
-    for page in pages:
-        chain_id, page_num, sender = page
-        message = "Fetching page {} of {}...".format(page_num, len(pages))
-        progress.report(page, message)
-        data = _query_blockchain(wallet_address, limit=LIMIT, page=page_num, chain_id=chain_id, sender=sender)
+    current_page = 0
+    # Two passes: is_sender=True (message.sender events) and is_sender=False (transfer.recipient events)
+    for is_sender in (True, False):
+        offset = 0
+        for _ in range(0, _max_pages()):
+            message = f"Fetching page {current_page + 1} of {num_pages}"
+            progress.report(current_page, message)
+            current_page += 1
 
-        out.extend(data["txs"])
+            elems, offset, _ = atom.api_lcd.get_txs(wallet_address, is_sender, offset)
 
-    out = _remove_duplicates(out)
+            out.extend(elems)
+            if offset is None:
+                break
 
     # Debugging only
     if localconfig.debug:
-        with open(DEBUG_FILE, 'w') as f:
+        with open(debug_file, "w") as f:
             json.dump(out, f, indent=4)
-        logging.info("Wrote to %s for debugging", DEBUG_FILE)
-
+        logging.info("Wrote to %s for debugging", debug_file)
     return out
 
 
@@ -214,7 +164,6 @@ def _remove_duplicates(elems):
         txids.add(elem["txhash"])
 
     out.sort(key=lambda elem: elem["timestamp"], reverse=True)
-
     return out
 
 

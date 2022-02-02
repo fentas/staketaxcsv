@@ -1,13 +1,14 @@
-
 """ Parsing and utility functions for fcd tx info """
 
 import base64
 import json
 import logging
 
-from terra.config_terra import localconfig
-from terra.constants import MILLION, CUR_ORION, IBC_TOKEN_NAMES
 from terra.api_lcd import LcdAPI
+from terra.config_terra import localconfig
+from terra.constants import CUR_ORION, IBC_TOKEN_NAMES, MILLION
+
+from osmo import util_osmo
 
 
 def _contracts(elem):
@@ -232,7 +233,7 @@ def _lookup_address(addr, txid):
         localconfig.currency_addresses[addr] = [currency, None]
         logging.info("Found symbol=%s ", currency)
 
-        return currency, None
+        return [currency, None]
     elif "asset_infos" in init_msg:
         out = [None, None]
 
@@ -277,6 +278,9 @@ def _lookup_lp_address(addr, txid):
         init_msg = _query_wasm(staking_token)
         address_pair = init_msg["init_hook"]["contract_addr"]
         currency1, currency2 = _lookup_address(address_pair, txid)
+    elif "mint" in init_msg:
+        address_pair = init_msg["mint"]["minter"]
+        currency1, currency2 = _lookup_address(address_pair, txid)
     else:
         raise Exception("Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
 
@@ -315,6 +319,7 @@ def _init_msg(data):
 
 def _ibc_token_name(address):
     # ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B -> "OSMO"
+    #cur = util_osmo._ibc_currency(address)
     return IBC_TOKEN_NAMES.get(address, address)
 
 

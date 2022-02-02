@@ -1,8 +1,9 @@
-
-import os
-import boto3
 import logging
+import os
 
+# until merged https://github.com/boto/boto3/pull/2746
+AWS_ENDPOINT_URL = os.environ.get("AWS_ENDPOINT_URL")
+import boto3
 
 STAGE = os.environ.get("STAGE")
 DYNAMO_TABLE_CACHE = "prod_cache" if STAGE == "prod" else "dev_cache"
@@ -10,12 +11,36 @@ FIELD_SOL_BLOCKS = "sol_blocks"
 FIELD_TERRA_CURRENCY_ADDRESSES = "terra_currency_addresses"
 FIELD_OSMO_IBC_ADDRESSES = "osmo_ibc_addresses"
 
-
 class Cache:
 
     def __init__(self):
-        self.dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
-        self.table = self.dynamodb.Table(DYNAMO_TABLE_CACHE)
+        self.dynamodb = boto3.resource('dynamodb', endpoint_url=AWS_ENDPOINT_URL)
+        self.table = self.__ensure_table()
+
+    def __ensure_table(self):
+        table_names = [table.name for table in self.dynamodb.tables.all()]
+        if DYNAMO_TABLE_CACHE not in table_names:
+            self.dynamodb.create_table(
+                AttributeDefinitions=[
+                    {
+                        'AttributeName': 'field',
+                        'AttributeType': 'S',
+                    },
+                ],
+                KeySchema=[
+                    {
+                        'AttributeName': 'field',
+                        'KeyType': 'HASH',
+                    },
+                ],
+                ProvisionedThroughput={
+                    'ReadCapacityUnits': 1,
+                    'WriteCapacityUnits': 1,
+                },
+                TableName=DYNAMO_TABLE_CACHE,
+            )
+        
+        return self.dynamodb.Table(DYNAMO_TABLE_CACHE)
 
     def _set_overwrite(self, field_name, data):
         response = self.table.put_item(

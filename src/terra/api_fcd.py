@@ -1,10 +1,11 @@
-
 import logging
-import requests
 import time
 
+import requests
+
 FCD_URL = "https://fcd.terra.dev"
-LIMIT_FCD = 100
+# todo make this configurable
+LIMIT_FCD = 10
 
 
 class FcdAPI:
@@ -41,7 +42,7 @@ class FcdAPI:
         if "logs" in elem:
             logs = elem["logs"]
             for log in logs:
-                if "events" in log:
+                if "events" in log and "events_by_type" not in log:
                     events = log["events"]
                     log["events_by_type"] = cls._events_by_type(events)
 

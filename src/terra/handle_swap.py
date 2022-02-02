@@ -1,9 +1,11 @@
-
-import logging
-from terra.make_tx import make_swap_tx_terra
-from terra.util_terra import _asset_to_currency, _float_amount
 from terra import util_terra
+from terra.make_tx import make_swap_tx_terra
+from common.make_tx import make_just_fee_tx
+from terra.util_terra import _asset_to_currency, _float_amount
 
+from common.ExporterTypes import (
+    TX_TYPE_FEE_SETTLEMENT,
+)
 
 def handle_swap_msgswap(exporter, elem, txinfo):
     txid = txinfo.txid
@@ -21,7 +23,6 @@ def handle_swap_msgswap(exporter, elem, txinfo):
 
 
 def handle_swap(exporter, elem, txinfo):
-    txid = txinfo.txid
     logs = elem["logs"]
 
     if "coin_received" in logs[0]["events_by_type"]:
@@ -45,8 +46,6 @@ def handle_execute_swap_operations(exporter, elem, txinfo):
 
 
 def _parse_log(exporter, txinfo, log):
-    wallet_address = txinfo.wallet_address
-
     # Parse using from_contract field if exists
     result = _parse_from_contract_if_exists(exporter, txinfo, log)
     if result:
@@ -57,9 +56,11 @@ def _parse_log(exporter, txinfo, log):
     if result:
         return
 
+    print(txinfo)
+    print(log)
     raise Exception("Bad condition in _parse_log()")
 
-
+#'events_by_type': {'coin_received': {'receiver': ['terra1yqg0wzvkjn7c83ra83ksthwu6vd927kssrhwhn'], 'amount': ['100000uusd']}, 'coin_spent': {'spender': ['terra1fjquyucxhek7ut7h596mwcrhfllyr8mvurfpmx'], 'amount': ['100000uusd']}, 'message': {'action': ['/cosmos.bank.v1beta1.MsgSend'], 'sender': ['terra1fjquyucxhek7ut7h596mwcrhfllyr8mvurfpmx'], 'module': ['bank']}, 'transfer': {'recipient': ['terra1yqg0wzvkjn7c83ra83ksthwu6vd927kssrhwhn'], 'sender': ['terra1fjquyucxhek7ut7h596mwcrhfllyr8mvurfpmx'], 'amount': ['100000uusd']}}
 def _parse_coins(exporter, txinfo, log):
     wallet_address = txinfo.wallet_address
 
@@ -84,8 +85,16 @@ def _parse_coins(exporter, txinfo, log):
         row = make_swap_tx_terra(txinfo, sent_amount, sent_currency, received_amount, received_currency)
         exporter.ingest_row(row)
         return True
-    else:
-        return False
+    # 99% sure this are fee's in a swap scenario (like coinhall or stt)
+    elif len(sent) == 1 and len(receivers) == 1 and len(spenders) == 1:
+        amount_string_sent = sent[0]
+        sent_amount, sent_currency = util_terra._amount(amount_string_sent)
+
+        row = make_just_fee_tx(txinfo, sent_amount, sent_currency, TX_TYPE_FEE_SETTLEMENT)
+        exporter.ingest_row(row)
+        return True
+    
+    return False
 
 
 def _parse_swap_operations(exporter, elem, txinfo):

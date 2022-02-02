@@ -1,27 +1,25 @@
-
 """
 usage: python3 report_sol.py <walletaddress> [--format all|cointracking|koinly|..]
 
 Prints transactions and writes CSV(s) to _reports/SOL*.csv
 """
 
-import logging
 import json
-from json.decoder import JSONDecodeError
-import os
+import logging
 import math
+from json.decoder import JSONDecodeError
 
-from common.Cache import Cache
-from common.Exporter import Exporter
-from common import report_util
-from settings_csv import TICKER_SOL, MESSAGE_STAKING_ADDRESS_FOUND, MESSAGE_ADDRESS_NOT_FOUND, SOL_NODE
 import sol.processor
-from sol.ProgressSol import ProgressSol, SECONDS_PER_STAKING_ADDRESS, SECONDS_PER_TX
+from common import report_util
+from common.Cache import Cache
+from common.ErrorCounter import ErrorCounter
+from common.Exporter import Exporter
+from settings_csv import MESSAGE_ADDRESS_NOT_FOUND, MESSAGE_STAKING_ADDRESS_FOUND, SOL_NODE, TICKER_SOL
+from sol import staking_rewards
+from sol.api_rpc import RpcAPI
 from sol.config_sol import localconfig
 from sol.constants import PROGRAMID_STAKE
-from sol.api_rpc import RpcAPI
-from sol import staking_rewards
-from common.ErrorCounter import ErrorCounter
+from sol.progress_sol import SECONDS_PER_STAKING_ADDRESS, SECONDS_PER_TX, ProgressSol
 from sol.TxInfoSol import WalletInfo
 
 LIMIT = 1000
@@ -30,7 +28,7 @@ RPC_TIMEOUT = 600  # seconds
 
 
 def main():
-    wallet_address, format, txid, options = report_util.parse_args()
+    wallet_address, export_format, txid, options = report_util.parse_args(TICKER_SOL)
     _read_options(options)
 
     if txid:
@@ -38,17 +36,14 @@ def main():
         exporter.export_print()
     else:
         exporter = txhistory(wallet_address)
-        report_util.run_exports(TICKER_SOL, wallet_address, exporter, format)
+        report_util.run_exports(TICKER_SOL, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
-    if options:
-        if options.get("debug") is True:
-            localconfig.debug = True
-        if options.get("cache") is True:
-            localconfig.cache = True
-        if options.get("limit"):
-            localconfig.limit = options.get("limit")
+    if not options:
+        return
+    report_util.read_common_options(localconfig, options)
+    logging.info("localconfig: %s", localconfig.__dict__)
 
 
 def wallet_exists(wallet_address):
@@ -112,18 +107,20 @@ def _num_txids(wallet_address):
     return len(txids)
 
 
-def txhistory(wallet_address, job=None):
+def txhistory(wallet_address, job=None, options=None):
     progress = ProgressSol()
-    wallet_info = WalletInfo(wallet_address)
     exporter = Exporter(wallet_address)
+    wallet_info = WalletInfo(wallet_address)
 
-    logging.info("Using SOLANA_URL=%s...", SOL_NODE)
+    if options:
+        _read_options(options)
     if job:
         localconfig.job = job
         localconfig.cache = True
     if localconfig.cache:
         localconfig.blocks = Cache().get_sol_blocks()
         logging.info("Loaded sol blocks info into cache...")
+    logging.info("Using SOLANA_URL=%s...", SOL_NODE)
 
     # Fetch data to so that job progress can be estimated ##########
 
@@ -144,7 +141,7 @@ def txhistory(wallet_address, job=None):
     _fetch_and_process_txs(txids, wallet_info, exporter, progress)
 
     # Update progress indicator
-    progress.num_staking_addresses = len(wallet_info.get_staking_addresses())
+    progress.update_estimate(len(wallet_info.get_staking_addresses()))
 
     # Staking rewards data
     staking_rewards.reward_txs(wallet_info, exporter, progress)
@@ -158,7 +155,7 @@ def txhistory(wallet_address, job=None):
 
 
 def _max_queries():
-    """ Calculated max number of queries based off of config limits """
+    """Calculated max number of queries based off of config limits"""
     max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
     max_queries = math.ceil(max_txs / LIMIT)
     logging.info("max_txs: %s, max_queries: %s", max_txs, max_queries)
@@ -166,14 +163,14 @@ def _max_queries():
 
 
 def _query_txids(addresses, progress):
-    """ Returns transactions txid's across all token account addresses """
+    """Returns transactions txid's across all token account addresses"""
     max_queries = _max_queries()
 
     out = []
     txids_seen = set()
     for i, address in enumerate(addresses):
         if progress and i % 10 == 0:
-            message = "Fetched txids for {} of {} addresses...".format(i, len(addresses))
+            message = f"Fetched txids for {i} of {len(addresses)} addresses..."
             progress.report_message(message)
 
         # Get transaction txids for this token account
@@ -216,11 +213,11 @@ def _fetch_and_process_txs(txids, wallet_info, exporter, progress):
 
         if i % 10 == 0:
             # Update progress to db every so often for user
-            message = "Fetched {} of {} transactions".format(i + 1, total_count)
-            progress.report("txs", i, message)
+            message = f"Fetched {i + 1} of {total_count} transactions"
+            progress.report(i, message, "txs")
 
-    message = "Finished fetching {} transactions".format(total_count)
-    progress.report("txs", total_count, message)
+    message = f"Finished fetching {total_count} transactions"
+    progress.report(total_count, message, "txs")
 
 
 if __name__ == "__main__":
