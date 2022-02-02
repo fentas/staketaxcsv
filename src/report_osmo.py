@@ -14,6 +14,7 @@ import osmo.api_tx
 import osmo.processor
 from common import report_util
 from common.Cache import Cache
+from common.CacheChain import CacheChain
 from common.ErrorCounter import ErrorCounter
 from common.Exporter import Exporter
 from osmo.config_osmo import localconfig
@@ -76,8 +77,8 @@ def _pages(wallet_address):
     max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
     num_txs = min(osmo.api_data.get_count_txs(wallet_address), max_txs)
 
-    last_page = math.ceil(num_txs / osmo.api_data.LIMIT_PER_QUERY) - 1
-    pages = list(range(last_page, -1, -1))
+    last_page = math.ceil(num_txs / osmo.api_data.LIMIT_PER_QUERY)
+    pages = list(range(0, last_page))
     return pages
 
 
@@ -93,6 +94,11 @@ def txhistory(wallet_address, job=None, options=None):
     if localconfig.cache:
         localconfig.ibc_addresses = Cache().get_osmo_ibc_addresses()
         logging.info("Loaded ibc_addresses from cache ...")
+
+        if CacheChain("osmo", wallet_address) is None:
+            logging.info("Could not initialize mongodb cache ...")
+        else:
+            logging.info("Chache txs and contracts to mongodb ...")
 
     # Set time estimate to estimate progress later
     reward_tokens = osmo.api_data.get_lp_tokens(wallet_address)
@@ -131,29 +137,45 @@ def _remove_dups(elems, txids_seen):
 
 
 def _fetch_and_process_txs(wallet_address, exporter, progress, pages):
-    # Fetch and parse data in batches (cumulative required too much memory), oldest first.
-    # Note: oldest first is opposite of api default (allows simpler lp stake/unstake logic)
+    # Fetch and parse data in batches (cumulative required too much memory).
+    # Note: sorts oldest first is opposite of api default (allows simpler lp stake/unstake logic)
     count_txs_processed = 0
     txids_seen = set()
-    i = 0
+    txs = []
+    cache = CacheChain()
+
     for page in pages:
-        message = "Fetching txs page={} in range [0,{}]".format(page, pages[0])
-        progress.report(i, message, "txs")
-        i += 1
+        message = "Fetching txs page={} in range [0,{}]".format(page, len(pages))
+        progress.report(page, message, "txs")
 
         elems = osmo.api_data.get_txs(wallet_address, page * osmo.api_data.LIMIT_PER_QUERY)
+        
+        # check if we hit the end
+        if len(elems) == 0:
+            break
 
         # Remove duplicates (data from this api has duplicates)
         elems_clean = _remove_dups(elems, txids_seen)
 
-        # Sort to process oldest first (so that lock/unlock tokens transactions processed correctly)
-        elems_clean.sort(key=lambda elem: elem["timestamp"])
+        # cache if enabled
+        if cache is not None:
+            all_unique = cache.insert_txs(elems_clean)
+            if all_unique == False:
+                break
+        else:
+            txs.extend(elems_clean)
 
-        osmo.processor.process_txs(wallet_address, elems_clean, exporter)
-        count_txs_processed += len(elems)
+    if cache is not None:
+        txs = list(cache.get_account_txs())
+    else:
+        # Sort to process oldest first (so that lock/unlock tokens transactions processed correctly)
+        txs.sort(key=lambda elem: elem["timestamp"])
+
+    osmo.processor.process_txs(wallet_address, txs, exporter)
+    count_txs_processed += len(txs)
 
     # Report final progress
-    progress.report(i, f"Retrieved total {count_txs_processed} transactions...", "txs")
+    # progress.report(i, f"Retrieved total {count_txs_processed} transactions...", "txs")
 
 
 if __name__ == "__main__":
