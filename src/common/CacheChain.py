@@ -21,6 +21,22 @@ CHAIN_CONFIG = {
         "sort": DESCENDING,
         "ignore": ["raw_log"]
     },
+    "secret": {
+        "keys": {
+            "txhash": "txhash",
+            "timestamp": "timestamp"
+        },
+        "sort": ASCENDING,
+        "ignore": ["raw_log"]
+    },
+    "cronos": {
+        "keys": {
+            "txhash": "hash",
+            "timestamp": "blockTime"
+        },
+        "sort": ASCENDING,
+        "ignore": ["log"]
+    },
 }
 
 class CacheChain:
