@@ -24,19 +24,19 @@ def get_tx(txid):
     return {**data["header"], **data["data"]}
 
 
-def _get_txs(wallet_address, offset, sleep_seconds):
+def _get_txs(wallet_address, from_id, sleep_seconds):
     uri_path = f"/v1/account/new_txs/{wallet_address}"
     query_params = {
         "limit": LIMIT_PER_QUERY,
-        "from": offset,
+        "from": from_id,
     }
 
     data = _query(uri_path, query_params, sleep_seconds)
     return data
 
 
-def get_txs(wallet_address, offset=0, sleep_seconds=1):
-    data = _get_txs(wallet_address, offset, sleep_seconds)
+def get_txs(wallet_address, from_id=0, sleep_seconds=1):
+    data = _get_txs(wallet_address, from_id, sleep_seconds)
 
     elems = [{**tx["header"], **tx["data"]} for tx in data]
     # No results or error
@@ -44,5 +44,5 @@ def get_txs(wallet_address, offset=0, sleep_seconds=1):
         return [], None, 0
     
     total_count = 0
-    next_offset = offset + LIMIT_PER_QUERY
-    return elems, next_offset, total_count
+    from_id = elems[-1]["id"] if len(elems) == LIMIT_PER_QUERY else None
+    return elems, from_id, total_count

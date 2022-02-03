@@ -93,7 +93,7 @@ def _fetch_txs(wallet_address, progress):
 
     cache = CacheChain()
     out = []
-    offset = 0
+    offset = None
     progress.set_estimate(1)
 
     while offset is not None:
