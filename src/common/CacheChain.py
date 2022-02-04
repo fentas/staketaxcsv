@@ -29,6 +29,14 @@ CHAIN_CONFIG = {
         "sort": ASCENDING,
         "ignore": ["raw_log"]
     },
+    "juno": {
+        "keys": {
+            "txhash": "txhash",
+            "timestamp": "timestamp"
+        },
+        "sort": ASCENDING,
+        "ignore": ["raw_log"]
+    },
     "cronos": {
         "keys": {
             "txhash": "hash",
