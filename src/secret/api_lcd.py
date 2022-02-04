@@ -4,8 +4,8 @@ import time
 import json
 
 import requests
-from settings_csv import SECRET_NODE
-
+# from settings_csv import SECRET_NODE
+SECRET_NODE = "https://api-secret.cosmostation.io"
 LIMIT_PER_QUERY = 50
 
 
