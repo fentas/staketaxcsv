@@ -114,13 +114,13 @@ def txhistory(wallet_address, job=None, options=None):
     if localconfig.cache:
         localconfig.currency_addresses = Cache().get_terra_currency_addresses()
         logging.info("Loaded terra_currency_addresses from cache ...")
+        localconfig.ibc_addresses = Cache().get_ibc_addresses()
+        logging.info("Loaded terra_currency_addresses and ibc_addresses from cache ...")
         
         if CacheChain("terra", wallet_address) is None:
             logging.info("Could not initialize mongodb cache ...")
         else:
             logging.info("Chache txs and contracts to mongodb ...")
-
-    num_txs=None
     if TERRA_FIGMENT_KEY:
         # Optional: Fetch count of transactions to estimate progress more accurately later
         num_txs = _num_txs(wallet_address)
@@ -139,6 +139,7 @@ def txhistory(wallet_address, job=None, options=None):
 
     if localconfig.cache:
         Cache().set_terra_currency_addresses(localconfig.currency_addresses)
+        Cache().set_ibc_addresses(localconfig.ibc_addresses)
     return exporter
 
 

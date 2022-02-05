@@ -92,7 +92,7 @@ def txhistory(wallet_address, job=None, options=None):
         localconfig.job = job
         localconfig.cache = True
     if localconfig.cache:
-        localconfig.ibc_addresses = Cache().get_osmo_ibc_addresses()
+        localconfig.ibc_addresses = Cache().get_ibc_addresses()
         logging.info("Loaded ibc_addresses from cache ...")
 
         if CacheChain("osmo", wallet_address) is None:
@@ -118,7 +118,7 @@ def txhistory(wallet_address, job=None, options=None):
     if localconfig.cache:
         # Remove entries where no symbol was found
         localconfig.ibc_addresses = {k: v for k, v in localconfig.ibc_addresses.items() if not v.startswith("ibc/")}
-        Cache().set_osmo_ibc_addresses(localconfig.ibc_addresses)
+        Cache().set_ibc_addresses(localconfig.ibc_addresses)
     return exporter
 
 
