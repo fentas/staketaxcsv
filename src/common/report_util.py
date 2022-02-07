@@ -3,7 +3,7 @@ import logging
 import os
 
 from common.ExporterTypes import FORMAT_DEFAULT, FORMATS
-from settings_csv import REPORTS_DIR, TICKER_ATOM, TICKER_LUNA, TICKER_OSMO, TICKER_ALGO
+from settings_csv import REPORTS_DIR, TICKER_ALGO, TICKER_ATOM, TICKER_LUNA, TICKER_OSMO
 
 ALL = "all"
 
@@ -114,4 +114,3 @@ def read_common_options(localconfig, options):
     localconfig.debug = options.get("debug", False)
     localconfig.cache = options.get("cache", False)
     localconfig.limit = options.get("limit", None)
-

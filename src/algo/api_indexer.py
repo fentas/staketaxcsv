@@ -1,7 +1,10 @@
 import logging
-import requests
 import urllib.parse
+
+import requests
+
 INDEXER_URL = "https://indexer.algoexplorerapi.io"
+
 
 class IndexerAPI:
 

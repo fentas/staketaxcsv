@@ -6,11 +6,11 @@ LCD documentation:
 
 import logging
 import time
+from urllib.parse import urlencode
 
 from common.CacheChain import CacheChain
 import requests
 from settings_csv import TERRA_LCD_NODE
-from urllib.parse import urlencode
 
 
 def _query(uri_path, query_params, sleep_seconds=1):

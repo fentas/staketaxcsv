@@ -4,11 +4,11 @@ import base64
 import json
 import logging
 
+import common.ibc_tokens
+from settings_csv import TICKER_LUNA
 from terra.api_lcd import LcdAPI
 from terra.config_terra import localconfig
 from terra.constants import CUR_ORION, IBC_TOKEN_NAMES, MILLION
-import common.ibc_tokens
-from settings_csv import TICKER_LUNA
 
 from osmo import util_osmo
 
@@ -137,9 +137,12 @@ def _extract_amounts(amount_string):
     Example input: '230344ukrw,3uluna,5umnt'
     Example output: { "KRW" : .0230344, "LUNA" : .000003, "MNT" : .00005 }
     """
-    out = {}
+    if amount_string == "":
+        return {}
 
+    out = {}
     amounts = amount_string.split(",")
+
     for amount in amounts:
         if "terra" in amount:
             # token address (i.e. "766890terra1vxtwu4ehgzz77mnfwrntyrmgl64qjs75mpwqaz")
