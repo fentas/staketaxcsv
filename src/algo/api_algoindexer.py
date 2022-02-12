@@ -1,4 +1,5 @@
 import logging
+import urllib.parse
 
 import requests
 from settings_csv import ALGO_INDEXER_NODE
@@ -27,14 +28,28 @@ class AlgoIndexerAPI:
             return None
 
     @classmethod
-    def get_transactions(cls, address, next=None):
+    def get_transactions(cls, address, after_date=None, before_date=None, next=None):
         url = "{}/v2/accounts/{}/transactions?limit={}".format(ALGO_INDEXER_NODE, address, LIMIT_ALGOINDEXER)
+        if after_date:
+            url += "&after-time={}".format(after_date.isoformat())
+        if before_date:
+            url += "&before-time={}".format(before_date.isoformat())
         if next:
             url += "&next={}".format(next)
         data, status_code = cls._query(url)
 
         if status_code == 200:
             return data["transactions"], data["next-token"] if "next-token" in data else None
+        else:
+            return None
+
+    @classmethod
+    def get_transactions_by_group(cls, group_id):
+        url = "{}/v2/transactions?group-id={}".format(ALGO_INDEXER_NODE, urllib.parse.quote(group_id))
+        data, status_code = cls._query(url)
+
+        if status_code == 200:
+            return data["transactions"]
         else:
             return None
 

@@ -12,7 +12,6 @@ import pprint
 
 import algo.processor
 from algo.api_algoindexer import LIMIT_ALGOINDEXER, AlgoIndexerAPI
-from algo.api_indexer import IndexerAPI
 from algo.config_algo import localconfig
 from algo.progress_algo import ProgressAlgo
 from common import report_util
@@ -39,6 +38,8 @@ def _read_options(options):
     if not options:
         return
     report_util.read_common_options(localconfig, options)
+    localconfig.after_date = options.get("after_date", None)
+    localconfig.before_date = options.get("before_date", None)
     logging.info("localconfig: %s", localconfig.__dict__)
 
 
@@ -53,7 +54,7 @@ def txone(wallet_address, txid_or_groupid):
     if data:
         elems = [data]
     else:
-        elems = IndexerAPI.get_transactions_by_group(txid_or_groupid)
+        elems = AlgoIndexerAPI.get_transactions_by_group(txid_or_groupid)
 
     print("\ndebug data:")
     pprint.pprint(elems)
@@ -106,7 +107,8 @@ def _get_txs(wallet_address, progress):
     next = None
     out = []
     for i in range(_max_queries()):
-        transactions, next = AlgoIndexerAPI.get_transactions(wallet_address, next)
+        transactions, next = AlgoIndexerAPI.get_transactions(
+            wallet_address, localconfig.after_date, localconfig.before_date, next)
         out.extend(transactions)
 
         if not next:

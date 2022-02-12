@@ -33,7 +33,7 @@ class LcdAPI:
                 return data
             
         uri = f"/wasm/contracts/{contract}"
-        logging.info("Querying lcd for contract=%s...", contract)
+        logging.info("Querying lcd for contract = %s ...", contract)
         data = _query(uri, {})
 
         #response = requests.get(url)
