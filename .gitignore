@@ -12,6 +12,7 @@ out.log
 
 # pycharm
 .idea/*
+.bak
 
 # https://extraterra-assets.s3.us-east-2.amazonaws.com/contracts.json
 # /contracts.json
