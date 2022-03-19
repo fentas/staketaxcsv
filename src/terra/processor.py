@@ -1,4 +1,5 @@
 import logging
+import importlib
 from datetime import datetime
 
 import terra.execute_type as ex
@@ -9,14 +10,6 @@ from common.TxInfo import TxInfo
 from terra import util_terra
 from terra.config_terra import localconfig
 from terra.constants import CONTRACT_RANDOMEARTH, CONTRACTS_LOTA, EXCHANGE_TERRA_BLOCKCHAIN
-from terra.handle_anchor_bond import handle_bond, handle_unbond, handle_unbond_withdraw
-from terra.handle_anchor_borrow import (
-    handle_borrow,
-    handle_deposit_collateral,
-    handle_repay,
-    handle_withdraw_collateral,
-)
-from terra.handle_anchor_earn import handle_anchor_earn_deposit, handle_anchor_earn_withdraw
 from terra.handle_failed_tx import handle_failed_tx
 from terra.handle_governance import handle_governance_reward, handle_governance_stake, handle_governance_unstake
 from terra.handle_lp import (
@@ -30,7 +23,6 @@ from terra.handle_lp import (
     handle_lp_withdraw,
     handle_lp_withdraw_idx,
 )
-from terra.handle_mirror_borrow import handle_deposit_borrow, handle_repay_withdraw
 from terra.handle_nft import (
     handle_accept_deposit,
     handle_add_to_deposit,
@@ -50,7 +42,9 @@ from terra.handle_reward_pylon import handle_airdrop_pylon
 from terra.handle_simple import handle_simple, handle_unknown, handle_unknown_detect_transfers
 from terra.handle_swap import handle_execute_swap_operations, handle_swap, handle_swap_msgswap
 from terra.handle_transfer import handle_transfer, handle_transfer_bridge_wormhole, handle_transfer_contract
-from terra.handle_zap import handle_zap_into_strategy, handle_zap_out_of_strategy
+
+import terra.contracts.unspecific as unspecific
+from terra.data import contract_info
 
 # execute_type -> tx_type mapping for generic transactions with no tax details
 EXECUTE_TYPES_SIMPLE = {
@@ -69,195 +63,198 @@ def process_txs(wallet_address, elems, exporter, progress):
 
 def process_tx(wallet_address, elem, exporter):
     txid = elem["txhash"]
-    msgtype, txinfo = _txinfo(exporter, elem, wallet_address)
+    print(txid)
+    txinfo = _txinfo(exporter, elem, wallet_address)
 
+    # Failed transaction
     if "code" in elem:
-        # Failed transaction
         return handle_failed_tx(exporter, elem, txinfo)
 
-    try:
-        if msgtype == "bank/MsgSend":
-            return handle_transfer(exporter, elem, txinfo)
-        elif msgtype in ["gov/MsgVote", "gov/MsgDeposit"]:
-            return handle_simple(exporter, txinfo, TX_TYPE_GOV)
-        elif msgtype == "market/MsgSwap":
-            return handle_swap_msgswap(exporter, elem, txinfo)
-        elif msgtype in ["staking/MsgDelegate", "distribution/MsgWithdrawDelegationReward",
-                         "staking/MsgBeginRedelegate", "staking/MsgUndelegate"]:
-            # LUNA staking reward
-            return handle_reward(exporter, elem, txinfo, msgtype)
-        elif msgtype == "wasm/MsgExecuteContract":
-            contract = util_terra._contract(elem, 0)
+    index = -1
+    for msg in elem["tx"]["value"]["msg"]:
+        index += 1
 
-            # Handle LoTerra contract as _LOTA_unknown
-            if contract in CONTRACTS_LOTA:
-                return handle_simple(exporter, txinfo, TX_TYPE_LOTA_UNKNOWN)
+        # filter parts of tranaction
+        msgtype = msg["type"]
 
-            execute_type = ex._execute_type(elem, txinfo)
-
-            # General
-            if execute_type in EXECUTE_TYPES_SIMPLE:
-                tx_type = EXECUTE_TYPES_SIMPLE[execute_type]
-                return handle_simple(exporter, txinfo, tx_type)
-            elif execute_type == ex.EXECUTE_TYPE_CLAIM:
-                return handle_airdrop(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_TRANSFER:
-                # Currently handles transfer to/from shuttle bridge
-                return handle_transfer_contract(exporter, elem, txinfo)
-
-            # nft transactions
-            elif execute_type in (ex.EXECUTE_TYPE_ADD_WHITELIST,
-                                  ex.EXECUTE_TYPE_ADD_MULTIPLE_USERS_TO_WHITE_LIST,
-                                  ex.EXECUTE_TYPE_ADD_TO_WHITELIST):
-                return handle_add_whitelist(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_ADD_TO_DEPOSIT:
-                return handle_add_to_deposit(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_ACCEPT_DEPOSIT:
-                return handle_accept_deposit(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_RESERVE_NFT:
-                return handle_reserve_nft(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_MINT_NFT:
-                return handle_mint_nft(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_PURCHASE_NFT:
-                return handle_purchase_nft(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_EXECUTE_ORDER:
-                return handle_execute_order(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_TRANSFER_NFT:
-                return handle_transfer_nft(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_SEND_NFT:
-                return handle_send_nft(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_APPROVE:
-                return handle_approve(exporter, elem, txinfo)
-            elif contract == CONTRACT_RANDOMEARTH:
-                execute_msgs_keys = util_terra._execute_msgs_keys(elem)
-
-                if execute_type == ex.EXECUTE_TYPE_WITHDRAW:
-                    handle_withdraw(exporter, elem, txinfo)
-                    if len(execute_msgs_keys) == 2 and execute_msgs_keys[1] == ex.EXECUTE_TYPE_TRANSFER_NFT:
-                        handle_transfer_nft(exporter, elem, txinfo, 1)
-                    return
-                elif ex.EXECUTE_TYPE_EXECUTE_ORDER in execute_msgs_keys:
-                    return handle_execute_order(exporter, elem, txinfo)
-                else:
-                    handle_unknown(exporter, txinfo)
-
-            # Swaps
-            elif execute_type == ex.EXECUTE_TYPE_SWAP:
-                return handle_swap(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_EXECUTE_SWAP_OPERATIONS:
-                return handle_execute_swap_operations(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_EXECUTE_SWAP_OPERATIONS_IN_MSG:
-                return handle_execute_swap_operations(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_ASSERT_LIMIT_ORDER:
+        try:
+            if msgtype == "bank/MsgSend":
+                return handle_transfer(exporter, elem, txinfo, index)
+            elif msgtype == "bank/MsgMultiSend":
+                # https://fcd.terra.dev/v1/tx/2bcb9bea8f74b0692196f5438e346d5b1c11d4a2edb5a7ce0b3029e46455a691
+                print("TODO multisend!")
+                return
+            elif msgtype in ["gov/MsgVote", "gov/MsgDeposit"]:
+                return handle_simple(exporter, txinfo, TX_TYPE_GOV)
+            elif msgtype == "market/MsgSwap":
                 return handle_swap_msgswap(exporter, elem, txinfo)
+            elif msgtype in ["staking/MsgDelegate", "distribution/MsgWithdrawDelegationReward",
+                            "staking/MsgBeginRedelegate", "staking/MsgUndelegate"]:
+                # LUNA staking reward
+                return handle_reward(exporter, elem, txinfo, msgtype)
+            elif msgtype == "wasm/MsgExecuteContract":
+                # general info
+                contract = msg["value"]["contract"]
+                # decode message
+                execute_msg = util_terra._execute_msg(elem, index)
+                msg["value"]["execute_msg"] = execute_msg
 
-            # Governance staking for ANC or MIR
-            elif execute_type == ex.EXECUTE_TYPE_STAKE_VOTING_TOKENS:
-                return handle_governance_stake(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_TOKENS:
-                return handle_governance_unstake(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
-                return handle_governance_reward(exporter, elem, txinfo)
+                # skip increase allowance
+                if "increase_allowance" in execute_msg:
+                    continue
 
-# non found
-# terra1mtwph2juhj0rvjz7dy92gvl6xvukaxu8rfv8ts -- bluna hub
-# terra1fxwelge6mf5l6z0rjpylzcfq9w9tw2q7tewaf5 -- spec staking
+                # send specific currency to other contract
+                if "send" in execute_msg and "contract" in execute_msg["send"]:
+                    contract = execute_msg["send"]["contract"]
+    
+                # Handle contracts
+                execute_type = None
+                info = contract_info(contract)
+                if info is not None:
+                    protocol = info['protocol'].lower()
+                    try:
+                        # try to load protocol
+                        c = importlib.import_module(f"terra.contracts.{protocol}")
 
-# loookup found
-# terra1s5eczhe0h0jutf46re52x5z4r03c8hupacxmdr -- spec token
-# terra15gwkyepfc6xgca5t5zefzwy42uts8l2m4g40k6 -- mir
-# terra14y5affaarufk3uscy2vr6pe6w6zqf2wpjzn5sh -- mtsla
-# terra14z56l0fp2lsf86zy3hty2z47ezkhnthtr9yq76 -- anc
-# terra1kcthelkax4j9x8d3ny6sdag0qmxxynl3qtcrpy -- mine
-# terra1dy9kmlm4anr92e42mrkjwzyvfqwz66un00rwr5 -- vkr
-# 
+                        # Custom handle transaction
+                        execute_type = c.handle(exporter, elem, txinfo, index)
 
-            # Anchor Borrow Transactions
-            elif execute_type == ex.EXECUTE_TYPE_BORROW_STABLE:
-                return handle_borrow(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_REPAY_STABLE:
-                return handle_repay(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_COLLATERAL:
-                return handle_deposit_collateral(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_UNLOCK_COLLATERAL:
-                return handle_withdraw_collateral(exporter, elem, txinfo)
+                        # If no execute type is returned there nothing to do anymore
+                        if execute_type is None:
+                            return
 
-            # Anchor Bond transactions
-            elif execute_type == ex.EXECUTE_TYPE_BOND:
-                return handle_bond(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_UNBOND_IN_MSG:
-                return handle_unbond(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_UNBONDED:
-                return handle_unbond_withdraw(exporter, elem, txinfo)
+                    except ModuleNotFoundError:
+                        logging.warn("Not supported protocol %s ...", protocol)
+                        print(info)
+                elif contract in unspecific.CONTRACTS:
+                    execute_type = unspecific.handle(exporter, elem, txinfo, index)
+                else:
+                    logging.warn("Unknown protocol contract=%s txid=%s", contract, txid)
+                    execute_type = ex._execute_type(elem, txinfo)
 
-            # Mirror Borrow Transactions
-            elif execute_type in [ex.EXECUTE_TYPE_OPEN_POSITION, ex.EXECUTE_TYPE_OPEN_POSITION_IN_MSG]:
-                return handle_deposit_borrow(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_BURN:
-                return handle_repay_withdraw(exporter, elem, txinfo)
+                # First check if we could figure out the process type
+                if execute_type == ex.EXECUTE_TYPE_UNKNOWN:
+                    logging.error("Exception when handling contract=%s txid=%s", contract, txid)
+                    ErrorCounter.increment("exception", txid)
+                    handle_unknown(exporter, txinfo)
+                    return
 
-            # Mirror LP transactions
-            elif execute_type == ex.EXECUTE_TYPE_PROVIDE_LIQUIDITY:
-                return handle_lp_deposit(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_LIQUIDITY:
-                return handle_lp_withdraw(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_BOND_IN_MSG:
-                return handle_lp_stake(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_STRATEGY_ID_IN_MSG:
-                return handle_lp_stake_deposit_strategy(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_UNBOND:
-                return handle_lp_unstake(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_FROM_STRATEGY:
-                return handle_lp_unstake_withdraw_from_strategy(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_AUTO_STAKE:
-                return handle_lp_long_farm(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_IDX:
-                return handle_lp_withdraw_idx(exporter, elem, txinfo)
-            elif execute_type in [ex.EXECUTE_TYPE_DEPOSIT_IDX, ex.EXECUTE_TYPE_DEPOSIT_IDX_IN_MSG]:
-                return handle_lp_deposit_idx(exporter, elem, txinfo)
+                # General
+                if execute_type in EXECUTE_TYPES_SIMPLE:
+                    tx_type = EXECUTE_TYPES_SIMPLE[execute_type]
+                    return handle_simple(exporter, txinfo, tx_type)
+                elif execute_type == ex.EXECUTE_TYPE_CLAIM:
+                    return handle_airdrop(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_TRANSFER:
+                    # Currently handles transfer to/from shuttle bridge
+                    return handle_transfer_contract(exporter, elem, txinfo)
 
-            # Anchor Earn transactions
-            elif execute_type in [ex.EXECUTE_TYPE_DEPOSIT_STABLE, ex.EXECUTE_TYPE_DEPOSIT]:
-                return handle_anchor_earn_deposit(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_REDEEM_STABLE:
-                return handle_anchor_earn_withdraw(exporter, elem, txinfo)
+                # nft transactions
+                elif execute_type in (ex.EXECUTE_TYPE_ADD_WHITELIST,
+                                    ex.EXECUTE_TYPE_ADD_MULTIPLE_USERS_TO_WHITE_LIST,
+                                    ex.EXECUTE_TYPE_ADD_TO_WHITELIST):
+                    return handle_add_whitelist(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_ADD_TO_DEPOSIT:
+                    return handle_add_to_deposit(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_ACCEPT_DEPOSIT:
+                    return handle_accept_deposit(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_RESERVE_NFT:
+                    return handle_reserve_nft(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_MINT_NFT:
+                    return handle_mint_nft(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_PURCHASE_NFT:
+                    return handle_purchase_nft(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_EXECUTE_ORDER:
+                    return handle_execute_order(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_TRANSFER_NFT:
+                    return handle_transfer_nft(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_SEND_NFT:
+                    return handle_send_nft(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_APPROVE:
+                    return handle_approve(exporter, elem, txinfo)
+                elif contract == CONTRACT_RANDOMEARTH:
+                    execute_msgs_keys = util_terra._execute_msgs_keys(elem)
 
-            # Contract reward transactions
-            elif execute_type in (ex.EXECUTE_TYPE_CLAIM_REWARDS, ex.EXECUTE_TYPE_WITHDRAW):
-                return handle_reward_contract(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_AIRDROP:
-                return handle_airdrop_pylon(exporter, elem, txinfo)
+                    if execute_type == ex.EXECUTE_TYPE_WITHDRAW:
+                        handle_withdraw(exporter, elem, txinfo)
+                        if len(execute_msgs_keys) == 2 and execute_msgs_keys[1] == ex.EXECUTE_TYPE_TRANSFER_NFT:
+                            handle_transfer_nft(exporter, elem, txinfo, 1)
+                        return
+                    elif ex.EXECUTE_TYPE_EXECUTE_ORDER in execute_msgs_keys:
+                        return handle_execute_order(exporter, elem, txinfo)
+                    else:
+                        handle_unknown(exporter, txinfo)
 
-            # Apollo
-            elif execute_type == ex.EXECUTE_TYPE_ZAP_INTO_STRATEGY:
-                return handle_zap_into_strategy(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_ZAP_OUT_OF_STRATEGY:
-                return handle_zap_out_of_strategy(exporter, elem, txinfo)
+                # Swaps
+                elif execute_type == ex.EXECUTE_TYPE_SWAP:
+                    return handle_swap(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_EXECUTE_SWAP_OPERATIONS:
+                    return handle_execute_swap_operations(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_EXECUTE_SWAP_OPERATIONS_IN_MSG:
+                    return handle_execute_swap_operations(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_ASSERT_LIMIT_ORDER:
+                    return handle_swap_msgswap(exporter, elem, txinfo)
 
-            # Bridge transfers
-            elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_TOKENS:
-                # wormhole bridge: transfer out
-                return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
-            elif execute_type == ex.EXECUTE_TYPE_SUBMIT_VAA:
-                # wormhole bridge: transfer in
-                return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
+                # Governance staking
+                elif execute_type == ex.EXECUTE_TYPE_STAKE_VOTING_TOKENS:
+                    return handle_governance_stake(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_TOKENS:
+                    return handle_governance_unstake(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
+                    return handle_governance_reward(exporter, elem, txinfo)
 
+
+                # LP transactions
+                elif execute_type == ex.EXECUTE_TYPE_PROVIDE_LIQUIDITY:
+                    return handle_lp_deposit(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_LIQUIDITY:
+                    return handle_lp_withdraw(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_BOND_IN_MSG:
+                    return handle_lp_stake(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_STRATEGY_ID_IN_MSG:
+                    return handle_lp_stake_deposit_strategy(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_UNBOND:
+                    return handle_lp_unstake(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_FROM_STRATEGY:
+                    return handle_lp_unstake_withdraw_from_strategy(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_AUTO_STAKE:
+                    return handle_lp_long_farm(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_IDX:
+                    return handle_lp_withdraw_idx(exporter, elem, txinfo)
+                elif execute_type in [ex.EXECUTE_TYPE_DEPOSIT_IDX, ex.EXECUTE_TYPE_DEPOSIT_IDX_IN_MSG]:
+                    return handle_lp_deposit_idx(exporter, elem, txinfo)
+
+                # Contract reward transactions
+                elif execute_type in (ex.EXECUTE_TYPE_CLAIM_REWARDS, ex.EXECUTE_TYPE_WITHDRAW):
+                    return handle_reward_contract(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_AIRDROP:
+                    return handle_airdrop_pylon(exporter, elem, txinfo)
+
+                # Bridge transfers
+                elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_TOKENS:
+                    # wormhole bridge: transfer out
+                    return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
+                elif execute_type == ex.EXECUTE_TYPE_SUBMIT_VAA:
+                    # wormhole bridge: transfer in
+                    return handle_transfer_bridge_wormhole(exporter, elem, txinfo)
+
+                else:
+                    logging.error("Unknown execute_type for txid=%s", txid)
+                    ErrorCounter.increment("unknown_execute_type", txid)
+                    handle_unknown_detect_transfers(exporter, txinfo, elem)
             else:
-                logging.error("Unknown execute_type for txid=%s", txid)
-                ErrorCounter.increment("unknown_execute_type", txid)
+                logging.error("Unknown msgtype for txid=%s", txid)
+                ErrorCounter.increment("unknown_msgtype", txid)
                 handle_unknown_detect_transfers(exporter, txinfo, elem)
-        else:
-            logging.error("Unknown msgtype for txid=%s", txid)
-            ErrorCounter.increment("unknown_msgtype", txid)
-            handle_unknown_detect_transfers(exporter, txinfo, elem)
 
-    except Exception as e:
-        logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
-        ErrorCounter.increment("exception", txid)
-        handle_unknown(exporter, txinfo)
+        except NameError as e: # Exception 
+            logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
+            ErrorCounter.increment("exception", txid)
+            handle_unknown(exporter, txinfo)
 
-        if localconfig.debug:
-            raise (e)
+            if localconfig.debug:
+                raise (e)
+    
 
 
 def _txinfo(exporter, elem, wallet_address):
@@ -281,7 +278,7 @@ def _txinfo(exporter, elem, wallet_address):
                 row.comment = "multicurrency fee"
                 exporter.ingest_row(row)
 
-    return msgtype, txinfo
+    return txinfo
 
 
 def _get_fee(elem):

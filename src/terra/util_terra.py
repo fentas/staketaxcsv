@@ -234,11 +234,11 @@ def _lookup_address(addr, txid):
     Returns <currency_symbol>.
     Updates cache for localconfig.currency_address, localconfig.decimals.
     """
-    if addr in localconfig.currency_addresses:
-        return localconfig.currency_addresses[addr]
+    #if addr in localconfig.currency_addresses:
+    #    return localconfig.currency_addresses[addr]
 
     init_msg = _query_wasm(addr)
-    logging.info("init_msg: %s", init_msg)
+    #logging.info("init_msg: %s", init_msg)
 
     if "symbol" in init_msg:
         currency = init_msg["symbol"]
@@ -248,7 +248,7 @@ def _lookup_address(addr, txid):
         localconfig.currency_addresses[addr] = currency
         localconfig.decimals[currency] = decimals
 
-        logging.info("Found symbol=%s decimals=%s", currency, decimals)
+        #logging.info("Found symbol=%s decimals=%s", currency, decimals)
         return currency
     elif "terraswap_factory" in init_msg:
         localconfig.currency_addresses[addr] = None

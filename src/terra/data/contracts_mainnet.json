@@ -1,0 +1,39 @@
+{
+    "terra1gecs98vcuktyfkrve9czrpgtg0m3aq586x6gzm": {
+        "protocol": "Anchor",
+        "name": "ANC-UST LP",
+        "icon": "https://finder.extraterrestrial.money/images/ANC100.png",
+        "id": "ANCHOR_LP_BOND",
+        "tags": [
+            "Anchor"
+        ]
+    },
+    "terra18ntqa5t2nfmqadpn9skrvk373dsk7kdv4gdwf3": {
+        "protocol": "Miaw",
+        "name": "Miaw Trader",
+        "icon": "https://www.miaw-trader.com/logo.png",
+        "id": "MIAW_SWAP",
+        "tags": [
+            "Miaw", "Swap"
+        ]
+    },
+    "terra10eyxljyqkcvhs4dgr534hk0wehc28tz6gwnh8a": {
+        "protocol": "TerraWorld",
+        "name": "TerraWorld Staking",
+        "icon": "https://finder.extraterrestrial.money/images/TWD100.png",
+        "id": "TERRAWORLD_STAKING",
+        "tags": [
+            "TerraWorld", "Staking"
+        ]
+    },
+    "terra10u9342cdwwqpe4wz9mf2c00ytlcr847wpe0xh4": {
+        "protocol": "Spectrum",
+        "name": "SPEC ANC-UST VAULT",
+        "id": "SPECTRUM_ASTROPORT_ANC-UST_VAULT",
+        "tags": [
+            "Spectrum",
+            "Astroport",
+            "Vault"
+        ]
+    }
+}

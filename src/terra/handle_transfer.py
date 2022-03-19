@@ -1,35 +1,50 @@
 from common.ErrorCounter import ErrorCounter
-from common.make_tx import make_transfer_in_tx, make_transfer_out_tx
+from common.make_tx import make_transfer_in_tx, make_transfer_out_tx, make_just_fee_tx
 from terra import util_terra
 from terra.handle_simple import handle_unknown, handle_unknown_detect_transfers
 
+from terra.data import contract_info, named_address
+from common.ExporterTypes import (
+    TX_TYPE_FEE,
+)
 
-def handle_transfer(exporter, elem, txinfo):
+def handle_transfer(exporter, elem, txinfo, index):
     wallet_address = txinfo.wallet_address
 
-    msgs = elem["tx"]["value"]["msg"]
-    for msg in msgs:
-        if msg["type"] != "bank/MsgSend":
-            continue
+    msg = elem["tx"]["value"]["msg"][index]
 
-        from_address = msg["value"]["from_address"]
-        to_address = msg["value"]["to_address"]
+    #print(elem['txhash'])
+    #print(msg)
+    from_address = msg["value"]["from_address"]
+    to_address = msg["value"]["to_address"]
 
-        for amount in msg["value"]["amount"]:
-            denom = amount["denom"]
-            amount_string = amount["amount"]
+    name = named_address(from_address)
+    if name != "":
+        txinfo.comment += f" from {name} "
+    name = named_address(to_address)
+    if name != "":
+        txinfo.comment += f" to {name}"
 
-            currency = util_terra._denom_to_currency(denom)
-            amount = util_terra._float_amount(amount_string, None)
+    for amount in msg["value"]["amount"]:
+        denom = amount["denom"]
+        amount_string = amount["amount"]
 
-            if wallet_address == from_address:
-                row = make_transfer_out_tx(txinfo, amount, currency, to_address)
-                exporter.ingest_row(row)
-            elif wallet_address == to_address:
-                row = make_transfer_in_tx(txinfo, amount, currency)
-                exporter.ingest_row(row)
+        currency = util_terra._denom_to_currency(denom)
+        amount = util_terra._float_amount(amount_string, None)
+
+        if wallet_address == from_address:
+            # Check if address is an 
+            info = contract_info(to_address)
+            if info is not None:
+                row = make_just_fee_tx(txinfo, amount, currency, TX_TYPE_FEE)
             else:
-                continue
+                row = make_transfer_out_tx(txinfo, amount, currency, to_address)
+            exporter.ingest_row(row)
+        elif wallet_address == to_address:
+            row = make_transfer_in_tx(txinfo, amount, currency)
+            exporter.ingest_row(row)
+        else:
+            continue
 
 
 def handle_transfer_contract(exporter, elem, txinfo):

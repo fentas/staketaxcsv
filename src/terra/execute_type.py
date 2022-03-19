@@ -3,6 +3,7 @@ import json
 import logging
 
 from terra import util_terra
+from terra.config_terra import localconfig
 
 EXECUTE_TYPE_UNKNOWN = "unknown_execute_type"
 EXECUTE_TYPE_SWAP = "swap"
@@ -66,7 +67,7 @@ EXECUTE_TYPE_SUBMIT_VAA = "submit_vaa"
 def _execute_type(elem, txinfo, index=0):
     txid = txinfo.txid
     execute_msg = util_terra._execute_msg(elem, index)
-    contract = util_terra._contract(elem, 0)
+    contract = util_terra._contract(elem, index)
     try:
         addr = util_terra._lookup_address(contract, txid)
     except Exception:
@@ -88,6 +89,11 @@ def _execute_type(elem, txinfo, index=0):
             if "stake_voting_tokens" in msg:
                 return EXECUTE_TYPE_STAKE_VOTING_TOKENS
             if "bond" in msg:
+                # check if it is LP or single side staking
+                if addr in localconfig.decimals:
+                    # As address is a single Token (Symbol) no LP
+                    return EXECUTE_TYPE_STAKE_VOTING_TOKENS 
+                # Handle as LP
                 return EXECUTE_TYPE_BOND_IN_MSG
             if "unbond" in msg:
                 return EXECUTE_TYPE_UNBOND_IN_MSG
@@ -193,8 +199,9 @@ def _execute_type(elem, txinfo, index=0):
     elif "submit_vaa" in execute_msg:
         return EXECUTE_TYPE_SUBMIT_VAA
 
-    logging.error("Unable to determine execute type for txid=%s %s", txid, execute_msg, extra={
-        "txid": txid,
-        "execute_msg": execute_msg
-    })
+    #contract = util_terra._contract(elem, 0)
+    #logging.error("Unable to determine execute type for contract=%s txid=%s msg=%s", contract, txid, execute_msg, extra={
+    #    "txid": txid,
+    #    "execute_msg": execute_msg
+    #})
     return EXECUTE_TYPE_UNKNOWN

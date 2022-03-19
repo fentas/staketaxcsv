@@ -1,0 +1,21 @@
+{
+    "terra17hk7d34mg77w6ujcr6n58p8hjl9ez8w9gj6auk": {
+        "protocol": "Coinhall",
+        "name": "Fee account",
+        "id": "COINHALL_FEES",
+        "fees": true,
+        "tags": [
+            "Fees"
+        ]
+    },
+    "terra17hk7d34mg77w6ujcr6n58p8hjl9ez8w9gj6auk": {
+        "protocol": "TerraLand",
+        "name": "Fee account",
+        "icon": "https://terralandio-site.s3.eu-central-1.amazonaws.com/TerraLand-logo-v1c-4x.png",
+        "id": "TERRALAND_FEES",
+        "fees": true,
+        "tags": [
+            "Fees"
+        ]
+    }
+}

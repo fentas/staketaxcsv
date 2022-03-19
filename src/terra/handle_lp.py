@@ -220,8 +220,13 @@ def handle_lp_unstake(exporter, elem, txinfo):
     txid = txinfo.txid
 
     # Determine LP currency
-    lp_currency_address = elem["logs"][0]["events_by_type"]["execute_contract"]["contract_address"][0]
-    lp_currency = util_terra._lookup_lp_address(lp_currency_address, txid)
+    lp_currency = None
+    for lp_currency_address in elem["logs"][0]["events_by_type"]["execute_contract"]["contract_address"]:
+        try:
+            lp_currency = util_terra._lookup_lp_address(lp_currency_address, txid)
+            break
+        except Exception:
+            pass
     if not lp_currency:
         raise Exception("Bad condition handle_lp_stake() txid=%s", txid)
 

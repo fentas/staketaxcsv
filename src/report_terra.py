@@ -169,6 +169,7 @@ def _get_txs(wallet_address, progress):
     offset = 0
     out = []
     for _ in range(_max_queries()):
+        break
         num_tx = len(out)
         progress.report(num_tx, f"Retrieving transaction {num_tx + 1} ...")
 
