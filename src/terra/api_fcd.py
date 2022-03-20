@@ -9,6 +9,7 @@ LIMIT_FCD = 10
 
 
 class FcdAPI:
+    session = requests.Session()
 
     @classmethod
     def get_tx(cls, txhash):
@@ -32,7 +33,7 @@ class FcdAPI:
     @classmethod
     def _query(cls, url):
         logging.info("Querying FCD url=%s...", url)
-        response = requests.get(url)
+        response = cls.session.get(url)
         data = response.json()
         time.sleep(5)
         return data

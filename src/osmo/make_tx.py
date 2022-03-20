@@ -1,5 +1,5 @@
 from common.Exporter import Row
-from common.ExporterTypes import TX_TYPE_STAKING
+from common.ExporterTypes import TX_TYPE_STAKING, TX_TYPE_LP_DEPOSIT, TX_TYPE_LP_WITHDRAW
 from common.make_tx import (
     _make_tx_exchange,
     make_reward_tx,
@@ -94,26 +94,29 @@ def make_osmo_unknown_tx_with_transfer(txinfo, msginfo, sent_amount, sent_curren
     return row
 
 
-def make_osmo_lp_deposit_tx(txinfo, msginfo, sent_amount, sent_currency, lp_amount, lp_currency, empty_fee=False):
-    row = make_osmo_tx(txinfo, msginfo, sent_amount, sent_currency, lp_amount, lp_currency,
-                       txid=None, empty_fee=empty_fee)
+def make_osmo_lp_deposit_tx(txinfo, msginfo, sent_amount, sent_currency, lp_amount, lp_currency):
+    row = _make_tx_exchange(
+        txinfo, sent_amount, sent_currency, lp_amount, lp_currency, TX_TYPE_LP_DEPOSIT)
+    _edit_row(row, txinfo, msginfo)
+    row.comment = "lp_deposit"
     return row
 
 
-def make_osmo_lp_withdraw_tx(txinfo, msginfo, lp_amount, lp_currency, received_amount, received_currency,
-                             empty_fee=False):
-    row = make_osmo_tx(txinfo, msginfo, lp_amount, lp_currency, received_amount, received_currency,
-                       txid=None, empty_fee=empty_fee)
+def make_osmo_lp_withdraw_tx(txinfo, msginfo, lp_amount, lp_currency, received_amount, received_currency):
+    row = _make_tx_exchange(
+        txinfo, lp_amount, lp_currency, received_amount, received_currency, TX_TYPE_LP_WITHDRAW)
+    _edit_row(row, txinfo, msginfo)
+    row.comment = "lp_withdraw"
     return row
 
 
 def make_osmo_lp_stake_tx(txinfo, msginfo, lp_amount, lp_currency, period_lock_id):
     row = make_osmo_tx(txinfo, msginfo, lp_amount, lp_currency, "", "")
-    row.comment = "lp stake (period_lock_id: {})".format(period_lock_id)
+    row.comment = "lp_stake (period_lock_id: {})".format(period_lock_id)
     return row
 
 
 def make_osmo_lp_unstake_tx(txinfo, msginfo, lp_amount, lp_currency, period_lock_id):
     row = make_osmo_tx(txinfo, msginfo, "", "", lp_amount, lp_currency)
-    row.comment = "lp unstake (period_lock_id: {})".format(period_lock_id)
+    row.comment = "lp_unstake (period_lock_id: {})".format(period_lock_id)
     return row

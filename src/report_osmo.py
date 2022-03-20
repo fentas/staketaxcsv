@@ -17,33 +17,31 @@ from common.Cache import Cache
 from common.CacheChain import CacheChain
 from common.ErrorCounter import ErrorCounter
 from common.Exporter import Exporter
+from common.ExporterTypes import LP_TREATMENT_TRANSFERS, FORMAT_DEFAULT
 from osmo.config_osmo import localconfig
 from osmo.lp_rewards import lp_rewards
 from osmo.progress_osmo import SECONDS_PER_PAGE, ProgressOsmo
 from settings_csv import TICKER_OSMO
 
-MAX_TRANSACTIONS = 10000
-
 
 def main():
     wallet_address, export_format, txid, options = report_util.parse_args(TICKER_OSMO)
-    _read_options(options)
 
     if txid:
+        _read_options(options)
         exporter = txone(wallet_address, txid)
         exporter.export_print()
+        if export_format != FORMAT_DEFAULT:
+            report_util.export_format_for_txid(exporter, export_format, txid)
     else:
-        exporter = txhistory(wallet_address)
+        exporter = txhistory(wallet_address, options)
         report_util.run_exports(TICKER_OSMO, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
-    if not options:
-        return
     report_util.read_common_options(localconfig, options)
 
-    localconfig.lp_transfers = options.get("lp_transfers", False)
-    localconfig.lp_trades = options.get("lp_trades", False)
+    localconfig.lp_treatment = options.get("lp_treatment", LP_TREATMENT_TRANSFERS)
     logging.info("localconfig: %s", localconfig.__dict__)
 
 
@@ -60,7 +58,7 @@ def txone(wallet_address, txid):
     pprint.pprint(data)
     print("\n")
 
-    exporter = Exporter(wallet_address)
+    exporter = Exporter(wallet_address, localconfig, TICKER_OSMO)
     txinfo = osmo.processor.process_tx(wallet_address, data, exporter)
     txinfo.print()
 
@@ -74,7 +72,7 @@ def estimate_duration(wallet_address):
 
 def _pages(wallet_address):
     """ Returns list of page numbers to be retrieved """
-    max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
+    max_txs = localconfig.limit
     num_txs = min(osmo.api_data.get_count_txs(wallet_address), max_txs)
 
     last_page = math.ceil(num_txs / osmo.api_data.LIMIT_PER_QUERY)
@@ -82,15 +80,9 @@ def _pages(wallet_address):
     return pages
 
 
-def txhistory(wallet_address, job=None, options=None):
-    progress = ProgressOsmo()
-    exporter = Exporter(wallet_address)
-
-    if options:
-        _read_options(options)
-    if job:
-        localconfig.job = job
-        localconfig.cache = True
+def txhistory(wallet_address, options):
+    # Configure localconfig based on options
+    _read_options(options)
     if localconfig.cache:
         localconfig.ibc_addresses = Cache().get_ibc_addresses()
         logging.info("Loaded ibc_addresses from cache ...")
@@ -99,6 +91,9 @@ def txhistory(wallet_address, job=None, options=None):
             logging.info("Could not initialize mongodb cache ...")
         else:
             logging.info("Chache txs and contracts to mongodb ...")
+
+    progress = ProgressOsmo()
+    exporter = Exporter(wallet_address, localconfig, TICKER_OSMO)
 
     # Set time estimate to estimate progress later
     reward_tokens = osmo.api_data.get_lp_tokens(wallet_address)
@@ -116,8 +111,6 @@ def txhistory(wallet_address, job=None, options=None):
     ErrorCounter.log(TICKER_OSMO, wallet_address)
 
     if localconfig.cache:
-        # Remove entries where no symbol was found
-        localconfig.ibc_addresses = {k: v for k, v in localconfig.ibc_addresses.items() if not v.startswith("ibc/")}
         Cache().set_ibc_addresses(localconfig.ibc_addresses)
     return exporter
 

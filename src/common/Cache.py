@@ -12,8 +12,12 @@ FIELD_TERRA_CURRENCY_ADDRESSES = "terra_currency_addresses"
 FIELD_TERRA_DECIMALS = "terra_decimals"
 FIELD_TERRA_LP_CURRENCY_ADDRESSES = "terra_lp_currency_addresses"
 FIELD_IBC_ADDRESSES = "ibc_addresses"
+FIELD_KOINLY_NULL_MAP = "koinly_null_map"
 
 class Cache:
+
+    dynamodb = None
+    table = None
 
     def __init__(self):
         self.dynamodb = boto3.resource('dynamodb', endpoint_url=AWS_ENDPOINT_URL)
@@ -98,7 +102,20 @@ class Cache:
         return self._get(FIELD_TERRA_DECIMALS)
 
     def set_ibc_addresses(self, data):
+        # Remove entries where no symbol was found
+        data = {k: v for k, v in data.items() if not v.startswith("ibc/")}
+
         return self._set_merge(FIELD_IBC_ADDRESSES, data)
 
     def get_ibc_addresses(self):
         return self._get(FIELD_IBC_ADDRESSES)
+
+    def set_koinly_null_map(self, data):
+        return self._set_overwrite(FIELD_KOINLY_NULL_MAP, data)
+
+    def get_koinly_null_map(self):
+        val = self._get(FIELD_KOINLY_NULL_MAP)
+        if val:
+            return val
+        else:
+            return []

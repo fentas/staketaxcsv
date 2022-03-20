@@ -3,12 +3,18 @@ from common.make_tx import make_airdrop_tx, make_reward_tx, make_unknown_tx
 from terra import util_terra
 from terra.config_terra import localconfig
 from terra.constants import CUR_ANC, CUR_MINE, CUR_MIR
-from terra.handle_reward import REWARD_CURRENCIES
+from terra.col4.handle_reward import REWARD_CURRENCIES
 
 CONTRACTS_AIRDROP = {
     "terra1kalp2knjm4cs3f59ukr4hdhuuncp648eqrgshw": CUR_MIR,
     "terra146ahqn6d3qgdvmj8cj96hh03dzmeedhsf0kxqm": CUR_ANC,
-    "terra1ud39n6c42hmtp2z0qmy8svsk7z3zmdkxzfwcf2": CUR_MINE
+    "terra1ud39n6c42hmtp2z0qmy8svsk7z3zmdkxzfwcf2": CUR_MINE,
+    "terra1za627n8zc8wqg06n9h7khpmjcnlkdkt38rkl3u": CUR_MINE
+}
+
+CONTRACTS_WITHDRAW_REWARD = {
+    "terra1897an2xux840p9lrh6py3ryankc6mspw49xse3",  # Anchor Staking Contract
+    "terra17f7zu97865jmknk7p2glqvxzhduk78772ezac5",  # Mirror Staking Contract
 }
 
 
@@ -86,14 +92,18 @@ def _extract_amount(elem, index, currency):
         pass
 
     try:
-        from_contract = util_terra._event_with_action(elem, "from_contract", "claim")
-        amounts = from_contract["amount"]
+        from_contract = (
+            util_terra._event_with_action(elem, "from_contract", "claim")
+            or util_terra._event_with_action(elem, "from_contract", "claim phase 1"))
+
+        amounts = (from_contract.get("amount", None)
+                   or from_contract.get("claim_amount", None))
         actions = from_contract["action"]
         for i in range(len(amounts)):
             action = actions[i]
             amount = amounts[i]
 
-            if action == "claim":
+            if action in ["claim", "claim phase 1"]:
                 return util_terra._float_amount(amount, currency)
     except Exception:
         pass

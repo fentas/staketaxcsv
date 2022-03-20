@@ -52,6 +52,8 @@ EXECUTE_TYPE_MINT_NFT = "mint_nft"
 EXECUTE_TYPE_PURCHASE_NFT = "purchase_nft"
 EXECUTE_TYPE_TRANSFER_NFT = "transfer_nft"
 EXECUTE_TYPE_EXECUTE_ORDER = "execute_order"
+EXECUTE_TYPE_CANCEL_ORDER = "cancel_order"
+EXECUTE_TYPE_POST_ORDER = "post_order"
 EXECUTE_TYPE_APPROVE = "approve"
 EXECUTE_TYPE_ADD_TO_WHITELIST = "add_to_whitelist"
 EXECUTE_TYPE_ADD_TO_DEPOSIT = "add_to_deposit"
@@ -62,7 +64,16 @@ EXECUTE_TYPE_ZAP_INTO_STRATEGY = "zap_into_strategy"
 EXECUTE_TYPE_ZAP_OUT_OF_STRATEGY = "zap_out_of_strategy"
 EXECUTE_TYPE_DEPOSIT_TOKENS = "deposit_tokens"
 EXECUTE_TYPE_SUBMIT_VAA = "submit_vaa"
-
+EXECUTE_TYPE_AUCTION = "auction"
+EXECUTE_TYPE_LIQUIDATE_COLLATERAL = "liquidate"
+EXECUTE_TYPE_SUBMIT_BID = "submit_bid"
+EXECUTE_TYPE_RETRACT_BID = "retract_bid"
+EXECUTE_TYPE_MINT_COLLATERAL = "mint_collateral"
+EXECUTE_TYPE_BURN_COLLATERAL = "burn_collateral"
+EXECUTE_TYPE_DISTRIBUTE = "distribute"
+EXECUTE_TYPE_INCREASE_LOCKUP = "increase_lockup"
+EXECUTE_TYPE_UNSTAKE_AND_CLAIM = "unstake_and_claim"
+EXECUTE_TYPE_SUBMIT_ORDER = "submit_order"
 
 def _execute_type(elem, txinfo, index=0):
     txid = txinfo.txid
@@ -76,6 +87,7 @@ def _execute_type(elem, txinfo, index=0):
     if "send" in execute_msg:
         send = execute_msg["send"]
         msg = send.get("msg", None)
+
         if type(msg) == str:
             msg = json.loads(base64.b64decode(msg))
 
@@ -109,6 +121,16 @@ def _execute_type(elem, txinfo, index=0):
                 return EXECUTE_TYPE_DEPOSIT_IDX_IN_MSG
             if "deposit" in msg and "strategy_id" in msg["deposit"]:
                 return EXECUTE_TYPE_DEPOSIT_STRATEGY_ID_IN_MSG
+            if "auction" in msg:
+                return EXECUTE_TYPE_AUCTION
+            if "stake" in msg:
+                return EXECUTE_TYPE_BOND_IN_MSG
+            if "stake_governance_token" in msg:
+                return EXECUTE_TYPE_STAKE_VOTING_TOKENS
+            if "increase_lockup" in msg:
+                return EXECUTE_TYPE_INCREASE_LOCKUP
+            if "unstake_and_claim" in msg:
+                return EXECUTE_TYPE_UNSTAKE_AND_CLAIM
 
     elif "claim" in execute_msg:
         return EXECUTE_TYPE_CLAIM
@@ -178,10 +200,16 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_ADD_MULTIPLE_USERS_TO_WHITE_LIST
     elif "mint_nft" in execute_msg:
         return EXECUTE_TYPE_MINT_NFT
+    elif "random_mint" in execute_msg:
+        return EXECUTE_TYPE_PURCHASE_NFT
     elif "purchase_nft" in execute_msg:
         return EXECUTE_TYPE_PURCHASE_NFT
     elif "execute_order" in execute_msg:
         return EXECUTE_TYPE_EXECUTE_ORDER
+    elif "cancel_order" in execute_msg:
+        return EXECUTE_TYPE_CANCEL_ORDER
+    elif "post_order" in execute_msg:
+        return EXECUTE_TYPE_POST_ORDER
     elif "transfer_nft" in execute_msg:
         return EXECUTE_TYPE_TRANSFER_NFT
     elif "send_nft" in execute_msg:
@@ -198,6 +226,22 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_DEPOSIT_TOKENS
     elif "submit_vaa" in execute_msg:
         return EXECUTE_TYPE_SUBMIT_VAA
+    elif "liquidate_collateral" in execute_msg:
+        return EXECUTE_TYPE_LIQUIDATE_COLLATERAL
+    elif "submit_bid" in execute_msg:
+        return EXECUTE_TYPE_SUBMIT_BID
+    elif "retract_bid" in execute_msg:
+        return EXECUTE_TYPE_RETRACT_BID
+    elif "unstake_governance_token" in execute_msg:
+        return EXECUTE_TYPE_WITHDRAW_VOTING_TOKENS
+    elif "burn" in execute_msg:
+        return EXECUTE_TYPE_BURN_COLLATERAL
+    elif "mint" in execute_msg:
+        return EXECUTE_TYPE_MINT_COLLATERAL
+    elif "distribute" in execute_msg:
+        return EXECUTE_TYPE_DISTRIBUTE
+    elif "submit_order" in execute_msg:
+        return EXECUTE_TYPE_SUBMIT_ORDER
 
     #contract = util_terra._contract(elem, 0)
     #logging.error("Unable to determine execute type for contract=%s txid=%s msg=%s", contract, txid, execute_msg, extra={

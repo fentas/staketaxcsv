@@ -12,6 +12,8 @@ from common.ExporterTypes import (
     TX_TYPE_UNKNOWN,
     TX_TYPE_FEE,
     TX_TYPE_FEE_SETTLEMENT,
+    TX_TYPE_LP_DEPOSIT,
+    TX_TYPE_LP_WITHDRAW,
 )
 from settings_csv import DONATION_WALLETS
 

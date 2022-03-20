@@ -14,6 +14,7 @@ from common import report_util
 from common.Cache import Cache
 from common.ErrorCounter import ErrorCounter
 from common.Exporter import Exporter
+from common.ExporterTypes import FORMAT_DEFAULT
 from settings_csv import MESSAGE_ADDRESS_NOT_FOUND, MESSAGE_STAKING_ADDRESS_FOUND, SOL_NODE, TICKER_SOL
 from sol import staking_rewards
 from sol.api_rpc import RpcAPI
@@ -22,26 +23,26 @@ from sol.constants import PROGRAMID_STAKE
 from sol.progress_sol import SECONDS_PER_STAKING_ADDRESS, SECONDS_PER_TX, ProgressSol
 from sol.TxInfoSol import WalletInfo
 
-LIMIT = 1000
-MAX_TRANSACTIONS = 5000
+LIMIT_PER_QUERY = 1000
 RPC_TIMEOUT = 600  # seconds
+ABSOLUTE_MAX_QUERIES = 100
 
 
 def main():
     wallet_address, export_format, txid, options = report_util.parse_args(TICKER_SOL)
-    _read_options(options)
 
     if txid:
+        _read_options(options)
         exporter = txone(wallet_address, txid)
         exporter.export_print()
+        if export_format != FORMAT_DEFAULT:
+            report_util.export_format_for_txid(exporter, export_format, txid)
     else:
-        exporter = txhistory(wallet_address)
+        exporter = txhistory(wallet_address, options)
         report_util.run_exports(TICKER_SOL, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
-    if not options:
-        return
     report_util.read_common_options(localconfig, options)
     logging.info("localconfig: %s", localconfig.__dict__)
 
@@ -88,7 +89,7 @@ def txone(wallet_address, txid):
     print(s)
     print("\n")
 
-    exporter = Exporter(wallet_address)
+    exporter = Exporter(wallet_address, localconfig, TICKER_SOL)
     txinfo = sol.processor.process_tx(WalletInfo(wallet_address), exporter, txid, data)
     txinfo.print()
     return exporter
@@ -107,20 +108,17 @@ def _num_txids(wallet_address):
     return len(txids)
 
 
-def txhistory(wallet_address, job=None, options=None):
-    progress = ProgressSol()
-    exporter = Exporter(wallet_address)
-    wallet_info = WalletInfo(wallet_address)
-
-    if options:
-        _read_options(options)
-    if job:
-        localconfig.job = job
-        localconfig.cache = True
+def txhistory(wallet_address, options):
+    # Configure localconfig based on options
+    _read_options(options)
     if localconfig.cache:
         localconfig.blocks = Cache().get_sol_blocks()
         logging.info("Loaded sol blocks info into cache...")
     logging.info("Using SOLANA_URL=%s...", SOL_NODE)
+
+    progress = ProgressSol()
+    exporter = Exporter(wallet_address, localconfig, TICKER_SOL)
+    wallet_info = WalletInfo(wallet_address)
 
     # Fetch data to so that job progress can be estimated ##########
 
@@ -154,17 +152,9 @@ def txhistory(wallet_address, job=None, options=None):
     return exporter
 
 
-def _max_queries():
-    """Calculated max number of queries based off of config limits"""
-    max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
-    max_queries = math.ceil(max_txs / LIMIT)
-    logging.info("max_txs: %s, max_queries: %s", max_txs, max_queries)
-    return max_queries
-
-
 def _query_txids(addresses, progress):
     """Returns transactions txid's across all token account addresses"""
-    max_queries = _max_queries()
+    max_txs = localconfig.limit
 
     out = []
     txids_seen = set()
@@ -175,17 +165,23 @@ def _query_txids(addresses, progress):
 
         # Get transaction txids for this token account
         before = None
-        for j in range(max_queries):
+        for j in range(ABSOLUTE_MAX_QUERIES):
             logging.info("query %s for address=%s", j, address)
 
-            txids, before = RpcAPI.get_txids(address, limit=LIMIT, before=before)
+            txids, before = RpcAPI.get_txids(address, limit=LIMIT_PER_QUERY, before=before)
+
             for txid in txids:
                 # Remove duplicate txids
                 if txid not in txids_seen:
                     out.append(txid)
                     txids_seen.add(txid)
 
+            # No more transactions
             if before is None:
+                break
+
+            # Reached max transaction limit
+            if len(txids) > max_txs:
                 break
 
     # Process oldest first

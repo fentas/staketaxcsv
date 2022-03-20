@@ -11,6 +11,7 @@ TOKEN_ACCOUNTS = {}
 
 
 class RpcAPI(object):
+    session = requests.Session()
 
     @classmethod
     def _fetch(cls, method, params_list):
@@ -24,14 +25,14 @@ class RpcAPI(object):
         headers = {}
 
         try:
-            response = requests.post(SOL_NODE, json=data, headers=headers)
+            response = cls.session.post(SOL_NODE, json=data, headers=headers)
 
         except TimeoutError:
             # quicknode server sometimes refuses connection after hundreds of requests
             s = random.randint(60, 180)
             logging.warning("Returned timeout.  Sleeping %s seconds and retrying once...", s)
             time.sleep(s)
-            response = requests.post(SOL_NODE, json=data, headers=headers)
+            response = cls.session.post(SOL_NODE, json=data, headers=headers)
 
         result = response.json()
 
@@ -246,7 +247,8 @@ class RpcAPI(object):
 
         # Extract last txid to use as "before" argument in subsequent query
         result_length = len(data["result"])
-        if result_length == 1000 or (limit and result_length == limit):
+
+        if result_length:
             last_txid = data["result"][-1]["signature"]
         else:
             last_txid = None

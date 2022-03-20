@@ -1,49 +1,14 @@
 import csv
 import io
-import logging
 from datetime import datetime
-
+import logging
 import pandas as pd
 import pytz
-from algo.constants import EXCHANGE_ALGORAND_BLOCKCHAIN
-from common.ExporterTypes import (
-    ACCOINT_FIELDS,
-    CALC_FIELDS,
-    CR_FIELDS,
-    CT_FIELDS,
-    FORMAT_ACCOINTING,
-    FORMAT_BALANCES,
-    FORMAT_COINTRACKER,
-    FORMAT_COINTRACKING,
-    FORMAT_CRYPTOTAXCALCULATOR,
-    FORMAT_DEFAULT,
-    FORMAT_KOINLY,
-    FORMAT_TAXBIT,
-    FORMAT_TOKENTAX,
-    FORMAT_ZENLEDGER,
-    KOINLY_FIELDS,
-    ROW_FIELDS,
-    TAXBIT_FIELDS,
-    TEST_ROW_FIELDS,
-    TT_FIELDS,
-    TX_TYPE_AIRDROP,
-    TX_TYPE_BORROW,
-    TX_TYPE_INCOME,
-    TX_TYPE_REPAY,
-    TX_TYPE_SPEND,
-    TX_TYPE_STAKING,
-    TX_TYPE_TRADE,
-    TX_TYPE_TRANSFER,
-    TX_TYPES_CSVEXPORT,
-    TX_TYPES_TAXABLE,
-    TX_TYPE_FEE,
-    TX_TYPE_FEE_SETTLEMENT,
-    TX_TYPE_FEE_BORROWING,
-    ZEN_FIELDS,
-)
 from pytz import timezone
-from sol.constants import EXCHANGE_SOLANA_BLOCKCHAIN
 from tabulate import tabulate
+
+from common import ExporterTypes as et
+from common.exporter_koinly import NullMap
 
 
 class Row:
@@ -65,9 +30,6 @@ class Row:
         self.z_index = z_index  # Determines ordering for rows with same txid
         self.comment = comment
 
-        # Use None instead of "False", so that it is consistent with what is shown to user
-        self.taxable = True if (self.tx_type in TX_TYPES_TAXABLE) else None
-
     def _format_currency(self, currency):
         if currency == "BLUNA":
             return "bLUNA"
@@ -88,7 +50,6 @@ class Row:
         return [
             self.timestamp,
             self.tx_type,
-            self.taxable,
             self.received_amount,
             self.received_currency,
             self.sent_amount,
@@ -106,7 +67,6 @@ class Row:
         return [
             self.timestamp,
             self.tx_type,
-            self.taxable,
             self.received_amount,
             self.received_currency,
             self.sent_amount,
@@ -119,21 +79,139 @@ class Row:
 
 class Exporter:
 
-    def __init__(self, wallet_address):
+    def __init__(self, wallet_address, localconfig=None, ticker=""):
         self.wallet_address = wallet_address
         self.rows = []
         self.is_reverse = None  # last sorted direction
+        self.ticker = ticker
+
+        self.lp_treatment = et.LP_TREATMENT_DEFAULT
+        self.use_cache = False
+
+        if localconfig:
+            if hasattr(localconfig, "lp_treatment"):
+                self.lp_treatment = localconfig.lp_treatment
+            self.use_cache = localconfig.cache
 
     def ingest_row(self, row):
         self.rows.append(row)
+
+    def ingest_csv(self, default_csv):
+        """ Loads default csv file into self.rows """
+        with open(default_csv, 'r') as f:
+            reader = csv.DictReader(f)
+            for i, row in enumerate(reader):
+                cur_row = Row(
+                    timestamp=row["timestamp"],
+                    tx_type=row["tx_type"],
+                    received_amount=row["received_amount"],
+                    received_currency=row["received_currency"],
+                    sent_amount=row["sent_amount"],
+                    sent_currency=row["sent_currency"],
+                    fee=row["fee"],
+                    fee_currency=row["fee_currency"],
+                    exchange=row["exchange"],
+                    wallet_address=row["wallet_address"],
+                    txid=row["txid"],
+                    url=row["url"],
+                    z_index=i,
+                    comment=row["comment"],
+                )
+                self.ingest_row(cur_row)
+
 
     def sort_rows(self, reverse=True):
         if self.is_reverse != reverse:
             self.rows.sort(key=lambda row: (row.timestamp, row.z_index), reverse=reverse)
             self.is_reverse = reverse
 
-    def _rows_export(self):
-        return filter(lambda row: row.tx_type in TX_TYPES_CSVEXPORT, self.rows)
+    def _rows_export(self, format):
+        self.sort_rows(reverse=True)
+        rows = filter(lambda row: row.tx_type in et.TX_TYPES_CSVEXPORT, self.rows)
+
+        if format in [et.FORMAT_KOINLY, et.FORMAT_COINPANDA]:
+            return rows
+
+        # For non-koinly CSVs, convert LP_DEPOSIT/LP_WITHDRAW into transfers/omit/trades
+        # (due to lack of native csv import support)
+        out = []
+        for row in rows:
+            if row.tx_type == et.TX_TYPE_LP_DEPOSIT:
+                if self.lp_treatment == et.LP_TREATMENT_OMIT:
+                    continue
+                elif self.lp_treatment == et.LP_TREATMENT_TRANSFERS:
+                    out.append(self._row_as_transfer_out(row))
+                elif self.lp_treatment == et.LP_TREATMENT_TRADES:
+                    out.append(self._row_as_trade(row))
+                else:
+                    raise Exception("Bad condition in _rows_export().  lp_treatment=%s".format(self.lp_treatment))
+            elif row.tx_type == et.TX_TYPE_LP_WITHDRAW:
+                if self.lp_treatment == et.LP_TREATMENT_OMIT:
+                    continue
+                elif self.lp_treatment == et.LP_TREATMENT_TRANSFERS:
+                    out.append(self._row_as_transfer_in(row))
+                elif self.lp_treatment == et.LP_TREATMENT_TRADES:
+                    out.append(self._row_as_trade(row))
+                else:
+                    raise Exception("Bad condition in _rows_export().  lp_treatment=%s".format(self.lp_treatment))
+            else:
+                out.append(row)
+
+        return out
+
+    def _row_as_transfer_out(self, row):
+        return Row(
+            timestamp=row.timestamp,
+            tx_type=et.TX_TYPE_TRANSFER,
+            received_amount="",
+            received_currency="",
+            sent_amount=row.sent_amount,
+            sent_currency=row.sent_currency,
+            fee=row.fee,
+            fee_currency=row.fee_currency,
+            exchange=row.exchange,
+            wallet_address=row.wallet_address,
+            txid=row.txid,
+            url=row.url,
+            z_index=row.z_index,
+            comment=row.comment,
+        )
+
+    def _row_as_transfer_in(self, row):
+        return Row(
+            timestamp=row.timestamp,
+            tx_type=et.TX_TYPE_TRANSFER,
+            received_amount=row.received_amount,
+            received_currency=row.received_currency,
+            sent_amount="",
+            sent_currency="",
+            fee=row.fee,
+            fee_currency=row.fee_currency,
+            exchange=row.exchange,
+            wallet_address=row.wallet_address,
+            txid=row.txid,
+            url=row.url,
+            z_index=row.z_index,
+            comment=row.comment,
+        )
+
+    def _row_as_trade(self, row):
+        return Row(
+            timestamp=row.timestamp,
+            tx_type=et.TX_TYPE_TRADE,
+            received_amount=row.received_amount,
+            received_currency=row.received_currency,
+            sent_amount=row.sent_amount,
+            sent_currency=row.sent_currency,
+            fee=row.fee,
+            fee_currency=row.fee_currency,
+            exchange=row.exchange,
+            wallet_address=row.wallet_address,
+            txid=row.txid,
+            url=row.url,
+            z_index=row.z_index,
+            comment=row.comment,
+        )
 
     def export_print(self):
         """ Prints transactions """
@@ -141,47 +219,58 @@ class Exporter:
         print(self.export_string())
 
     def export_string(self):
-        table = [ROW_FIELDS]
+        table = [et.ROW_FIELDS]
         table.extend([row.as_array() for row in self.rows])
         return tabulate(table)
 
     def export_for_test(self):
-        table = [TEST_ROW_FIELDS]
+        table = [et.TEST_ROW_FIELDS]
         table.extend([row.as_array_short() for row in self.rows])
 
         return tabulate(table)
 
     def export_format(self, format, csvpath):
-        if format == FORMAT_DEFAULT:
+        if format == et.FORMAT_DEFAULT:
             self.export_default_csv(csvpath)
-        elif format == FORMAT_BALANCES:
+        elif format == et.FORMAT_BALANCES:
             self.export_balances_csv(csvpath)
-        elif format == FORMAT_COINTRACKING:
-            self.export_cointracking_csv(csvpath)
-        elif format == FORMAT_COINTRACKER:
-            self.export_cointracker_csv(csvpath)
-        elif format == FORMAT_KOINLY:
-            self.export_koinly_csv(csvpath)
-        elif format == FORMAT_CRYPTOTAXCALCULATOR:
-            self.export_calculator_csv(csvpath)
-        elif format == FORMAT_ACCOINTING:
+        elif format == et.FORMAT_ACCOINTING:
             self.export_accointing_csv(csvpath)
             xlsxpath = csvpath.replace(".csv", ".xlsx")
             self.convert_csv_to_xlsx(csvpath, xlsxpath)
             return xlsxpath
-        elif format == FORMAT_TOKENTAX:
-            self.export_tokentax_csv(csvpath)
-        elif format == FORMAT_ZENLEDGER:
-            self.export_zenledger_csv(csvpath)
-        elif format == FORMAT_TAXBIT:
+        elif format == et.FORMAT_BITCOINTAX:
+            self.export_bitcointax_csv(csvpath)
+        elif format == et.FORMAT_COINLEDGER:
+            self.export_coinledger_csv(csvpath)
+        elif format == et.FORMAT_COINPANDA:
+            self.export_coinpanda_csv(csvpath)
+        elif format == et.FORMAT_COINTRACKING:
+            self.export_cointracking_csv(csvpath)
+        elif format == et.FORMAT_COINTRACKER:
+            self.export_cointracker_csv(csvpath)
+        elif format == et.FORMAT_CRYPTOCOM:
+            self.export_cryptocom_csv(csvpath)
+        elif format == et.FORMAT_CRYPTOTAXCALCULATOR:
+            self.export_calculator_csv(csvpath)
+        elif format == et.FORMAT_KOINLY:
+            self.export_koinly_csv(csvpath)
+        elif format == et.FORMAT_RECAP:
+            self.export_recap_csv(csvpath)
+        elif format == et.FORMAT_TAXBIT:
             self.export_taxbit_csv(csvpath)
+        elif format == et.FORMAT_TOKENTAX:
+            self.export_tokentax_csv(csvpath)
+        elif format == et.FORMAT_ZENLEDGER:
+            self.export_zenledger_csv(csvpath)
+
         return csvpath
 
     def export_default_csv(self, csvpath=None, truncate=0):
         self.sort_rows(reverse=True)
 
         rows = self.rows
-        table = [ROW_FIELDS]
+        table = [et.ROW_FIELDS]
         if truncate:
             table.extend([row.as_array() for row in rows[0:truncate]])
         else:
@@ -206,7 +295,7 @@ class Exporter:
             TX_TYPE_AIRDROP: "Airdrop",
             TX_TYPE_STAKING: "Staking",
             TX_TYPE_TRADE: "Trade",
-            TX_TYPE_TRANSFER: TX_TYPE_TRANSFER,
+            TX_TYPE_TRANSFER: et.TX_TYPE_TRANSFER,
             TX_TYPE_INCOME: "Income",
             TX_TYPE_SPEND: "Spend",
             TX_TYPE_BORROW: "Income (non taxable)",
@@ -215,21 +304,19 @@ class Exporter:
             TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
             TX_TYPE_FEE_BORROWING: "Borrowing Fee",
         }
-
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+        rows = self._rows_export(et.FORMAT_COINTRACKING)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(CT_FIELDS)
+            mywriter.writerow(et.CT_FIELDS)
 
             # data rows
             for row in rows:
                 # Determine type
                 ct_type = cointracking_types[row.tx_type]
-                if ct_type == TX_TYPE_TRANSFER:
+                if ct_type == et.TX_TYPE_TRANSFER:
                     if row.received_amount and not row.sent_amount:
                         ct_type = "Deposit"
                     elif row.sent_amount and not row.received_amount:
@@ -278,7 +365,7 @@ class Exporter:
             return row.sent_amount, row.received_amount, None
         elif "multicurrency fee" in comment:
             return row.sent_amount, row.received_amount, None
-        elif ct_type == "Deposit" and row.tx_type != TX_TYPE_BORROW:
+        elif ct_type == "Deposit" and row.tx_type != et.TX_TYPE_BORROW:
             return row.sent_amount, row.received_amount, None
         elif row.received_amount and row.received_currency == row.fee_currency:
             # adjust received amount
@@ -311,24 +398,22 @@ class Exporter:
     def export_tokentax_csv(self, csvpath):
         """ Write CSV, suitable for import into TokenTax """
         tokentax_types = {
-            TX_TYPE_AIRDROP: "Airdrop",
-            TX_TYPE_STAKING: "Staking",
-            TX_TYPE_TRADE: "Trade",
-            TX_TYPE_TRANSFER: "Transfer",
-            TX_TYPE_INCOME: "Income",
-            TX_TYPE_SPEND: "Spend",
-            TX_TYPE_BORROW: "Transfer",
-            TX_TYPE_REPAY: "Transfer"
+            et.TX_TYPE_AIRDROP: "Airdrop",
+            et.TX_TYPE_STAKING: "Staking",
+            et.TX_TYPE_TRADE: "Trade",
+            et.TX_TYPE_TRANSFER: "Transfer",
+            et.TX_TYPE_INCOME: "Income",
+            et.TX_TYPE_SPEND: "Spend",
+            et.TX_TYPE_BORROW: "Transfer",
+            et.TX_TYPE_REPAY: "Transfer",
         }
-
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+        rows = self._rows_export(et.FORMAT_TOKENTAX)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(TT_FIELDS)
+            mywriter.writerow(et.TT_FIELDS)
 
             # data rows
             for row in rows:
@@ -369,24 +454,22 @@ class Exporter:
     def export_cointracker_csv(self, csvpath):
         """ Write CSV, suitable for import into Cointracker """
         tags = {
-            TX_TYPE_AIRDROP: "airdrop",
-            TX_TYPE_STAKING: "staked",
-            TX_TYPE_TRADE: "",
-            TX_TYPE_TRANSFER: "",
-            TX_TYPE_INCOME: "payment",
-            TX_TYPE_SPEND: "",
-            TX_TYPE_BORROW: "",
-            TX_TYPE_REPAY: ""
+            et.TX_TYPE_AIRDROP: "airdrop",
+            et.TX_TYPE_STAKING: "staked",
+            et.TX_TYPE_TRADE: "",
+            et.TX_TYPE_TRANSFER: "",
+            et.TX_TYPE_INCOME: "payment",
+            et.TX_TYPE_SPEND: "",
+            et.TX_TYPE_BORROW: "",
+            et.TX_TYPE_REPAY: "",
         }
-
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+        rows = self._rows_export(et.FORMAT_COINTRACKER)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(CR_FIELDS)
+            mywriter.writerow(et.CR_FIELDS)
 
             # data rows
             for row in rows:
@@ -407,96 +490,260 @@ class Exporter:
 
         logging.info("Wrote to %s", csvpath)
 
-    def export_koinly_csv(self, csvpath):
-        """ Write CSV, suitable for import into Koinly """
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+    def export_coinledger_csv(self, csvpath):
+        """ Write CSV, suitable for import into CoinLedger (cryptotrader.tax) """
+        tags = {
+            et.TX_TYPE_AIRDROP: "Airdrop",
+            et.TX_TYPE_STAKING: "Staking",
+            et.TX_TYPE_TRADE: "",
+            et.TX_TYPE_TRANSFER: "Transfer",
+            et.TX_TYPE_INCOME: "Income",
+            et.TX_TYPE_SPEND: "Gift Sent",
+            et.TX_TYPE_BORROW: "Transfer",
+            et.TX_TYPE_REPAY: "Transfer",
+        }
+        rows = self._rows_export(et.FORMAT_COINLEDGER)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(KOINLY_FIELDS)
+            mywriter.writerow(et.CL_FIELDS)
 
             # data rows
             for row in rows:
-                if row.tx_type == TX_TYPE_TRADE:
-                    label = ""
-                elif row.tx_type == TX_TYPE_AIRDROP:
-                    label = "airdrop"
-                elif row.tx_type == TX_TYPE_STAKING:
-                    label = "staking"
-                elif row.tx_type == TX_TYPE_INCOME:
-                    label = "other income"
-                elif row.tx_type == TX_TYPE_SPEND:
-                    label = "cost"
-                elif row.tx_type == TX_TYPE_BORROW:
-                    label = ""
-                elif row.tx_type == TX_TYPE_REPAY:
-                    label = ""
-                elif row.tx_type == TX_TYPE_TRANSFER:
-                    label = ""
-                else:
-                    label = ""
-                    logging.error("koinly: unable to handle tx_type=%s", row.tx_type)
+                tag = tags[row.tx_type]
+                if tag == "Transfer":
+                    if row.received_amount and not row.sent_amount:
+                        tag = "Deposit"
+                    if row.sent_amount and not row.received_amount:
+                        tag = "Withdrawal"
 
                 line = [
-                    row.timestamp,                                       # Date
-                    row.sent_amount,                                     # Sent Amount
-                    self._koinly_currency(row.sent_currency),            # Sent Currency
-                    row.received_amount,                                 # Received Amount
-                    self._koinly_currency(row.received_currency),        # Received Currency
-                    row.fee,                                             # Fee Amount
-                    self._koinly_currency(row.fee_currency),             # Fee Currency
-                    "",                                                  # Net Worth Amount
-                    "",                                                  # Net Worth Currency
-                    label,                                               # Label
-                    row.comment,                                         # Description
-                    row.txid                                             # TxHash
+                    self._coinledger_timestamp(row.timestamp),           # Date (UTC)
+                    "{}_blockchain".format(self.ticker.lower()),         # Platform (Optional)
+                    self._coinledger_code(row.sent_currency),            # Asset Sent
+                    row.sent_amount,                                     # Amount Sent
+                    self._coinledger_code(row.received_currency),        # Asset Received
+                    row.received_amount,                                 # Amount Received
+                    self._coinledger_code(row.fee_currency),             # Fee Currency (Optional)"
+                    row.fee,                                             # Fee Amount (Optional)"
+                    tag,                                                 # Type
+                    row.comment,                                         # Description (Optional)
+                    row.txid                                             # TxHash (Optional)
                 ]
                 mywriter.writerow(line)
 
         logging.info("Wrote to %s", csvpath)
 
-    def _koinly_currency(self, currency):
-        if currency and currency.upper() == "PSI":
-            # koinly default PSI is "Passive Income", not "Nexus Protocol" that we want
-            return "ID:106376"
-        else:
-            return currency
+    def _coinledger_timestamp(self, ts):
+        # Convert "2021-08-04 15:25:43" to "08/14/2021 15:25:43"
+        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%m/%d/%Y %H:%M:%S")
 
-    def export_calculator_csv(self, csvpath):
-        """ Write CSV, suitable for import into cryptataxcalculator.io """
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+    def _coinledger_code(self, currency):
+        return currency
+
+    def export_cryptocom_csv(self, csvpath):
+        """ Write CSV, suitable for import into tax.crypto.com """
+        tags = {
+            et.TX_TYPE_AIRDROP: "airdrop",
+            et.TX_TYPE_STAKING: "reward",
+            et.TX_TYPE_TRADE: "swap",
+            et.TX_TYPE_TRANSFER: "transfer",
+            et.TX_TYPE_INCOME: "payment",
+            et.TX_TYPE_SPEND: "payment",
+            et.TX_TYPE_BORROW: "transfer",
+            et.TX_TYPE_REPAY: "transfer",
+        }
+        rows = self._rows_export(et.FORMAT_CRYPTOCOM)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(CALC_FIELDS)
+            mywriter.writerow(et.CRCOM_FIELDS)
+
+            # data rows
+            for row in rows:
+                # determine Type field
+                row_type = tags[row.tx_type]
+
+                # determine Received Currency, Received Amount, Sent Currency, Sent Amount
+                if row_type == "transfer":
+                    # cryptocom has strange spec where receive/sent should be same on transfers between users' wallets
+                    if row.received_amount:
+                        amt, cur = row.received_amount, row.received_currency
+                    elif row.sent_amount:
+                        amt, cur = row.sent_amount, row.sent_currency
+                    else:
+                        logging.error("export_crytocom_csv(): bad condition row=%s", row.as_array())
+                    received_amount, received_currency = amt, cur
+                    sent_amount, sent_currency = amt, cur
+                else:
+                    received_amount = row.received_amount
+                    received_currency = row.received_currency
+                    sent_currency = row.sent_currency
+                    sent_amount = row.sent_amount
+
+                # Determine fee and fee currency
+                if row.tx_type in [et.TX_TYPE_AIRDROP, et.TX_TYPE_STAKING]:
+                    # To workaround "Fee is not allowed for received types" error.
+                    # This is probably incorrect implementation by tax.crypto.com, but
+                    # failed import is worse result for user.
+                    fee = ""
+                    fee_currency = ""
+                else:
+                    fee = row.fee
+                    fee_currency = row.fee_currency
+
+                line = [
+                    self._cryptocom_timestamp(row.timestamp),  # Date
+                    row_type,                                  # Type
+                    received_currency,                         # Received Currency
+                    received_amount,                           # Received Amount
+                    "",                                        # Received Net Worth
+                    sent_currency,                             # Sent Currency
+                    sent_amount,                               # Sent Amount
+                    "",                                        # Sent Net Worth
+                    fee_currency,                              # Fee Currency
+                    fee,                                       # Fee Amount
+                    ""                                         # Fee Net Worth
+                ]
+                mywriter.writerow(line)
+
+        logging.info("Wrote to %s", csvpath)
+
+    def _cryptocom_timestamp(self, ts):
+        # Convert "2021-08-04 15:25:43" to "08/14/2021 15:25:43"
+        dt = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        return dt.strftime("%m/%d/%Y %H:%M:%S")
+
+    def export_koinly_csv(self, csvpath):
+        """ Write CSV, suitable for import into Koinly """
+        NullMap.load(self.use_cache)
+        rows = self._rows_export(et.FORMAT_KOINLY)
+
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
+            mywriter = csv.writer(f)
+
+            # header row
+            mywriter.writerow(et.KOINLY_FIELDS)
+
+            # data rows
+            for row in rows:
+                if row.tx_type == et.TX_TYPE_TRADE:
+                    label = ""
+                elif row.tx_type == et.TX_TYPE_AIRDROP:
+                    label = "airdrop"
+                elif row.tx_type == et.TX_TYPE_STAKING:
+                    label = "staking"
+                elif row.tx_type == et.TX_TYPE_INCOME:
+                    label = "other income"
+                elif row.tx_type == et.TX_TYPE_SPEND:
+                    label = "cost"
+                elif row.tx_type == et.TX_TYPE_BORROW:
+                    label = ""
+                elif row.tx_type == et.TX_TYPE_REPAY:
+                    label = ""
+                elif row.tx_type == et.TX_TYPE_TRANSFER:
+                    label = ""
+                elif row.tx_type == et.TX_TYPE_LP_DEPOSIT:
+                    label = "Liquidity In"
+                elif row.tx_type == et.TX_TYPE_LP_WITHDRAW:
+                    label = "Liquidity Out"
+                else:
+                    logging.error("koinly: unable to handle tx_type=%s", row.tx_type)
+
+                # Currency fields
+                sent_currency = self.koinly_currency(row.sent_currency)
+                received_currency = self.koinly_currency(row.received_currency)
+                fee_currency = self.koinly_currency(row.fee_currency)
+
+                # Description field
+                # Add note to description if LP token symbol mapped to NULL*
+                description = row.comment
+                if sent_currency.startswith("NULL"):
+                    description += " " + row.sent_currency
+                if received_currency.startswith("NULL"):
+                    description += " " + row.received_currency
+                if fee_currency.startswith("NULL"):
+                    description += " " + row.fee_currency
+
+                line = [
+                    row.timestamp,                                       # Date
+                    row.sent_amount,                                     # Sent Amount
+                    sent_currency,                                       # Sent Currency
+                    row.received_amount,                                 # Received Amount
+                    received_currency,                                   # Received Currency
+                    row.fee,                                             # Fee Amount
+                    fee_currency,                                        # Fee Currency
+                    "",                                                  # Net Worth Amount
+                    "",                                                  # Net Worth Currency
+                    label,                                               # Label
+                    description,                                         # Description
+                    row.txid                                             # TxHash
+                ]
+                mywriter.writerow(line)
+
+        logging.info("Wrote to %s", csvpath)
+        NullMap.flush(self.use_cache)
+
+    def koinly_currency(self, currency):
+        # Reference: https://app.koinly.io/p/markets?search=STARS
+        remap = {
+            "APOLLO": "ID:28478",
+            "ASTRO": "ID:48993",
+            "PSI": "ID:106376",
+            "STARS": "ID:36899",
+            "LOOP": "ID:10933"
+        }
+
+        if self._is_koinly_lp(currency):
+            return NullMap.get_null_symbol(currency)
+        if currency and currency.upper() in remap:
+            return remap[currency.upper()]
+        return currency
+
+    def _is_koinly_lp(self, currency):
+        """ Returns True if lp currency should be replaced with NULL* in koinly CSV (i.e. GAMM-22, LP_MIR_UST) """
+        if currency.startswith("LP_"):
+            return True
+        if currency.startswith("GAMM-"):
+            return True
+        return False
+
+    def export_calculator_csv(self, csvpath):
+        """ Write CSV, suitable for import into cryptataxcalculator.io """
+        rows = self._rows_export(et.FORMAT_CRYPTOTAXCALCULATOR)
+
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
+            mywriter = csv.writer(f)
+
+            # header row
+            mywriter.writerow(et.CALC_FIELDS)
 
             # data rows
             for row in rows:
                 # Determine type field
-                if row.tx_type == TX_TYPE_STAKING:
+                if row.tx_type == et.TX_TYPE_STAKING:
                     type = "interest"
-                elif row.tx_type == TX_TYPE_AIRDROP:
+                elif row.tx_type == et.TX_TYPE_AIRDROP:
                     type = "airdrop"
-                elif row.tx_type == TX_TYPE_TRADE:
+                elif row.tx_type == et.TX_TYPE_TRADE:
                     type = "sell"
-                elif row.tx_type == TX_TYPE_TRANSFER:
+                elif row.tx_type == et.TX_TYPE_TRANSFER:
                     if row.received_amount:
                         type = "transfer-in"
                     elif row.sent_amount:
                         type = "transfer-out"
-                elif row.tx_type == TX_TYPE_INCOME:
+                elif row.tx_type == et.TX_TYPE_INCOME:
                     type = "income"
-                elif row.tx_type == TX_TYPE_SPEND:
+                elif row.tx_type == et.TX_TYPE_SPEND:
                     type = "sell"
-                elif row.tx_type == TX_TYPE_BORROW:
+                elif row.tx_type == et.TX_TYPE_BORROW:
                     type = "borrow"
-                elif row.tx_type == TX_TYPE_REPAY:
+                elif row.tx_type == et.TX_TYPE_REPAY:
                     type = "loan-repayment"
                 else:
                     type = ""
@@ -551,31 +798,29 @@ class Exporter:
 
     def export_accointing_csv(self, csvpath):
         """ Writes CSV, whose xlsx translation is suitable for import into Accointing """
-        self.sort_rows(reverse=True)
-
-        rows = self._rows_export()
+        rows = self._rows_export(et.FORMAT_ACCOINTING)
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(ACCOINT_FIELDS)
+            mywriter.writerow(et.ACCOINT_FIELDS)
 
             # data rows
             for row in rows:
                 # Determine transaction_type, classification
-                if row.tx_type == TX_TYPE_STAKING:
+                if row.tx_type == et.TX_TYPE_STAKING:
                     transaction_type = "deposit"
                     classification = "staked"
-                elif row.tx_type == TX_TYPE_AIRDROP:
+                elif row.tx_type == et.TX_TYPE_AIRDROP:
                     transaction_type = "deposit"
                     classification = "airdrop"
-                elif row.tx_type == TX_TYPE_TRADE:
+                elif row.tx_type == et.TX_TYPE_TRADE:
                     transaction_type = "order"
                     classification = ""
-                elif row.tx_type == TX_TYPE_SPEND:
+                elif row.tx_type == et.TX_TYPE_SPEND:
                     transaction_type = "withdraw"
                     classification = "payment"
-                elif row.tx_type == TX_TYPE_TRANSFER:
+                elif row.tx_type == et.TX_TYPE_TRANSFER:
                     if row.sent_amount:
                         transaction_type = "withdraw"
                     elif row.received_amount:
@@ -584,13 +829,13 @@ class Exporter:
                         transaction_type = ""
                         logging.error("Bad condition for transfer")
                     classification = ""
-                elif row.tx_type == TX_TYPE_INCOME:
+                elif row.tx_type == et.TX_TYPE_INCOME:
                     transaction_type = "deposit"
                     classification = "income"
-                elif row.tx_type == TX_TYPE_BORROW:
+                elif row.tx_type == et.TX_TYPE_BORROW:
                     transaction_type = "deposit"
                     classification = ""
-                elif row.tx_type == TX_TYPE_REPAY:
+                elif row.tx_type == et.TX_TYPE_REPAY:
                     transaction_type = "withdraw"
                     classification = ""
                 else:
@@ -622,24 +867,22 @@ class Exporter:
     def export_zenledger_csv(self, csvpath):
         """ Writes CSV, suitable for import into ZenLedger """
         zen_tx_types = {
-            TX_TYPE_AIRDROP: "airdrop",
-            TX_TYPE_STAKING: "staking",
-            TX_TYPE_TRADE: "Trade",
-            TX_TYPE_TRANSFER: "transfer",
-            TX_TYPE_INCOME: "misc reward",
-            TX_TYPE_SPEND: "payment",
-            TX_TYPE_BORROW: "transfer",
-            TX_TYPE_REPAY: "transfer"
+            et.TX_TYPE_AIRDROP: "airdrop",
+            et.TX_TYPE_STAKING: "staking",
+            et.TX_TYPE_TRADE: "Trade",
+            et.TX_TYPE_TRANSFER: "transfer",
+            et.TX_TYPE_INCOME: "misc reward",
+            et.TX_TYPE_SPEND: "payment",
+            et.TX_TYPE_BORROW: "transfer",
+            et.TX_TYPE_REPAY: "transfer"
         }
-
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
+        rows = self._rows_export(et.FORMAT_ZENLEDGER)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(ZEN_FIELDS)
+            mywriter.writerow(et.ZEN_FIELDS)
 
             # data rows
             for row in rows:
@@ -671,45 +914,197 @@ class Exporter:
                 mywriter.writerow(line)
         logging.info("Wrote to %s", csvpath)
 
-    def export_taxbit_csv(self, csvpath):
-        self.sort_rows(reverse=True)
-        rows = self._rows_export()
-
-        TAXBIT_TYPES = {
-            TX_TYPE_STAKING: "Income",
-            TX_TYPE_AIRDROP: "Income",
-            TX_TYPE_TRADE: "Trade",
-            TX_TYPE_SPEND: "Expense",
-            TX_TYPE_INCOME: "Income",
-            TX_TYPE_TRANSFER: "Transfer Unknown",
-            TX_TYPE_BORROW: "Transfer Unknown",
-            TX_TYPE_REPAY: "Transfer Unknown"
+    def export_bitcointax_csv(self, csvpath):
+        """ Writes CSV, suitable for import into bitcoin.tax """
+        actions = {
+            et.TX_TYPE_AIRDROP: "INCOME",
+            et.TX_TYPE_STAKING: "INCOME",
+            et.TX_TYPE_TRADE: "BUY",
+            et.TX_TYPE_TRANSFER: None,
+            et.TX_TYPE_INCOME: "INCOME",
+            et.TX_TYPE_SPEND: "SPEND",
+            et.TX_TYPE_BORROW: None,
+            et.TX_TYPE_REPAY: None,
         }
+        rows = self._rows_export(et.FORMAT_BITCOINTAX)
 
         with open(csvpath, 'w', newline='', encoding='utf-8') as f:
             mywriter = csv.writer(f)
 
             # header row
-            mywriter.writerow(TAXBIT_FIELDS)
+            mywriter.writerow(et.BTAX_FIELDS)
 
             # data rows
+            for row in rows:
+                action = actions[row.tx_type]
+                if action is None:
+                    continue
 
-            if self.wallet_address.startswith("cosmo"):
-                tx_source = "ATOM WALLET"
-            elif self.wallet_address.startswith("terra"):
-                tx_source = "LUNA WALLET"
-            elif self.wallet_address.startswith("osmo"):
-                tx_source = "OSMO WALLET"
-            else:
-                exchange = self.rows[0].exchange if len(self.rows) else ""
-                if exchange == EXCHANGE_SOLANA_BLOCKCHAIN:
-                    tx_source = "SOL WALLET"
-                elif exchange == EXCHANGE_ALGORAND_BLOCKCHAIN:
-                    tx_source = "ALGO WALLET"
+                if action == "INCOME":
+                    symbol = row.received_currency
+                    volume = row.received_amount
+                    currency = ""
+                    total = ""
+                elif action == "SPEND":
+                    symbol = row.sent_currency
+                    volume = row.sent_amount
+                    currency = ""
+                    total = ""
+                elif action == "BUY":
+                    symbol = row.received_currency
+                    volume = row.received_amount
+                    currency = row.sent_currency
+                    total = row.sent_amount
                 else:
-                    tx_source = ""
-                    logging.critical("Bad condition: unable to identify tx_source in export_taxbit_csv()")
+                    raise Exception("export_bitcointax_csv(): Bad condition for action={}".format(action))
 
+                line = [
+                    self._bitcointax_timestamp(row.timestamp),  # Date
+                    action,                                     # Action
+                    symbol,                                     # Symbol
+                    volume,                                     # Volume
+                    currency,                                   # Currency
+                    total,                                      # Total
+                    row.fee,                                    # Fee
+                    row.fee_currency,                           # FeeCurrency
+                    row.txid,                                   # Memo
+                ]
+                mywriter.writerow(line)
+        logging.info("Wrote to %s", csvpath)
+
+    def export_recap_csv(self, csvpath):
+        """ Write CSV, suitable for import into Recap """
+        self.sort_rows(reverse=True)
+        rows = self._rows_export(et.FORMAT_RECAP)
+
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
+            mywriter = csv.writer(f)
+
+            # header row
+            mywriter.writerow(et.RECAP_FIELDS)
+
+            # data rows
+            for row in rows:
+                # Determine type field
+                if row.tx_type == et.TX_TYPE_STAKING:
+                    cur_type = "StakingReward"
+                elif row.tx_type == et.TX_TYPE_AIRDROP:
+                    cur_type = "Airdrop"
+                elif row.tx_type == et.TX_TYPE_TRADE:
+                    cur_type = "Trade"
+                elif row.tx_type == et.TX_TYPE_TRANSFER:
+                    if row.received_amount:
+                        cur_type = "Deposit"
+                    elif row.sent_amount:
+                        cur_type = "Withdrawal"
+                elif row.tx_type == et.TX_TYPE_INCOME:
+                    cur_type = "Income"
+                elif row.tx_type == et.TX_TYPE_SPEND:
+                    cur_type = "Purchase"
+                elif row.tx_type == et.TX_TYPE_BORROW:
+                    cur_type = "Deposit"
+                elif row.tx_type == et.TX_TYPE_REPAY:
+                    cur_type = "Withdrawal"
+                else:
+                    cur_type = ""
+                    logging.critical("No type determined for tx_type=%s", row.tx_type)
+
+                line = [
+                    cur_type,                                   # Type
+                    row.timestamp,                              # Date
+                    row.received_amount,                        # InOrBuyAmount
+                    row.received_currency,                      # InOrBuyCurrency
+                    row.sent_amount,                            # OutOrSellAmount
+                    row.sent_currency,                          # OutOrSellCurrency
+                    row.fee,                                    # FeeAmount
+                    row.fee_currency,                           # FeeCurrency
+                    row.comment,                                # Description
+                    row.txid,                                   # ID
+                ]
+                mywriter.writerow(line)
+
+        logging.info("Wrote to %s", csvpath)
+
+    def export_coinpanda_csv(self, csvpath):
+        """ Writes CSV, suitable for import into bitcoin.tax """
+        labels = {
+            et.TX_TYPE_AIRDROP: "Airdrop",
+            et.TX_TYPE_STAKING: "Staking",
+            et.TX_TYPE_TRADE: "Swap",
+            et.TX_TYPE_TRANSFER: "",
+            et.TX_TYPE_INCOME: "Income",
+            et.TX_TYPE_SPEND: "Cost",
+            et.TX_TYPE_BORROW: "Receive Loan",
+            et.TX_TYPE_REPAY: "Repay Loan",
+            et.TX_TYPE_LP_DEPOSIT: "Liquidity in",
+            et.TX_TYPE_LP_WITHDRAW: "Liquidity out",
+        }
+
+        rows = self._rows_export(et.FORMAT_COINPANDA)
+
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
+            mywriter = csv.writer(f)
+
+            # header row
+            mywriter.writerow(et.CP_FIELDS)
+
+            # data rows
+            for row in rows:
+                # Determine Type
+                if row.sent_amount and row.received_amount:
+                    row_type = "Trade"
+                elif row.sent_amount:
+                    row_type = "Send"
+                elif row.received_amount:
+                    row_type = "Receive"
+                else:
+                    logging.critical("exporter_coinpanda_csv(): bad condition for row type %s", row.as_array())
+                    row_type = ""
+
+                # Determine Label
+                label = labels[row.tx_type]
+                if "nft" in row.comment:
+                    label = "NFT"
+
+                line = [
+                    row.timestamp,          # Date
+                    row_type,               # Type
+                    row.sent_amount,        # Sent Amount
+                    row.sent_currency,      # Sent Currency
+                    row.received_amount,    # Received Amount
+                    row.received_currency,  # Received Currency
+                    row.fee,                # Fee Amount
+                    row.fee_currency,       # Fee Currency
+                    label,                  # Label
+                    row.comment,            # Description
+                    row.txid,               # TxHash
+                ]
+                mywriter.writerow(line)
+        logging.info("Wrote to %s", csvpath)
+
+    def export_taxbit_csv(self, csvpath):
+        TAXBIT_TYPES = {
+            et.TX_TYPE_STAKING: "Income",
+            et.TX_TYPE_AIRDROP: "Income",
+            et.TX_TYPE_TRADE: "Trade",
+            et.TX_TYPE_SPEND: "Expense",
+            et.TX_TYPE_INCOME: "Income",
+            et.TX_TYPE_TRANSFER: "Transfer Unknown",
+            et.TX_TYPE_BORROW: "Transfer Unknown",
+            et.TX_TYPE_REPAY: "Transfer Unknown"
+        }
+        rows = self._rows_export(et.FORMAT_TAXBIT)
+        if not self.ticker:
+            logging.error("Unable to identify tx_source.  Missing ticker")
+        tx_source = "{} WALLET".format(self.ticker.upper())
+
+        with open(csvpath, 'w', newline='', encoding='utf-8') as f:
+            mywriter = csv.writer(f)
+
+            # header row
+            mywriter.writerow(et.TAXBIT_FIELDS)
+
+            # data rows
             for row in rows:
                 # Determine Transaction Type
                 tb_type = TAXBIT_TYPES[row.tx_type]
@@ -762,6 +1157,10 @@ class Exporter:
 
         logging.info("Wrote to %s", csvpath)
 
+    def _bitcointax_timestamp(self, ts):
+        # Convert "2021-08-04 15:25:43" to "2021-08-04 15:25:43 -0000"
+        return ts + " -0000"
+
     def _taxbit_timestamp(self, ts):
         # Convert "2021-08-04 15:25:43" to "2021-08-04T15:25:43Z"
         d, t = ts.split(" ")
@@ -788,52 +1187,38 @@ class Exporter:
         return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _cointracking_code(self, currency):
-        # Terra
-        if currency == "ANC":
-            return "ANC2"
-        if currency == "LUNA":
-            return "LUNA2"
-        if currency == "MIR":
-            return "MIR2"
-        if currency == "MINE":
-            return "MINE2"
-        if currency == "SOL":
-            return "SOL2"
-        if currency == "ASTRO":
-            return "ASTRO5"
-        if currency == "BETH":
-            return "BETH3"
-        if currency == "Psi":
-            return "PSI2"
-        if currency == "ORION":
-            return "ORION2"
-        if currency == "WHALE":
-            return "WHALE3"
-        if currency == "PLY":
-            return "PLY3"
-        if currency == "TWD":
-            return "TWD2"
-        if currency == "GLOW":
-            return "GLOW3"
-        # Terra: stablecoins to currency to track correct value
-        if currency == "SGT":
-            return "SGD"
-        if currency == "SET":
-            return "SEK"
-        if currency == "INT":
-            return "INR"
-        if currency == "CNT":
-            return "CNY"
-        if currency == "CAT":
-            return "CAD"
-        if currency == "wtUST":
-            return "UST3"
-        # todo this does not exist event as currency
-        if currency == "MNT":
-            return "MNT2"
-        # Cosmos
-        if currency == "ATOM":
-            return "ATOM2"
+        # Reference: https://cointracking.info/coin_charts.php
+        remap = {
+            "ANC": "ANC2",
+            "ASTRO": "ASTRO5",
+            "ATOM": "ATOM2",
+            "GLOW": "GLOW3",
+            "BETH": "BETH3",
+            "LUNA": "LUNA2",
+            "LOOP": "LOOP2",
+            "LUNI": "LUNI2",
+            "MINE": "MINE2",
+            "MIR": "MIR2",
+            "ORION": "ORION2",
+            "PLY": "PLY3",
+            "PRISM": "PRISM3",
+            "PSI": "PSI2",
+            "SOL": "SOL2",
+            "STARS": "STARS3",
+            "TNS": "TNS2",
+            "TWD": "TWD2",
+            "WHALE": "WHALE3",
+            "WTUST": "UST3",
+            # Terra: stablecoins to currency to track correct value
+            "SGT": "SGD",
+            "SET": "SEK",
+            "INT": "INR",
+            "CNT": "CNY",
+            "CAT": "CAD",
+            "MNT": "MNT2"
+        }
+        if currency and currency.upper() in remap:
+            return remap[currency.upper()]
         return currency
 
     def _cointracker_code(self, currency):

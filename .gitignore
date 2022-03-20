@@ -16,3 +16,6 @@ out.log
 
 # https://extraterra-assets.s3.us-east-2.amazonaws.com/contracts.json
 # /contracts.json
+
+koinly_null_map.json
+.DS_Store

@@ -17,7 +17,7 @@ from .earn import (
     handle_anchor_earn_deposit, 
     handle_anchor_earn_withdraw,
 )
-from terra.handle_lp import (
+from terra.col4.handle_lp import (
     handle_lp_stake,
     handle_lp_unstake,
 )

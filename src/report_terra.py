@@ -22,34 +22,32 @@ from common.Cache import Cache
 from common.CacheChain import CacheChain
 from common.ErrorCounter import ErrorCounter
 from common.Exporter import Exporter
+from common.ExporterTypes import FORMAT_DEFAULT, LP_TREATMENT_TRANSFERS
 from settings_csv import TERRA_FIGMENT_KEY, TICKER_LUNA
 from terra.api_fcd import LIMIT_FCD, FcdAPI
 from terra.api_search_figment import LIMIT_FIGMENT, SearchAPIFigment
 from terra.config_terra import localconfig
 from terra.progress_terra import SECONDS_PER_TX, ProgressTerra
 
-MAX_TRANSACTIONS = 10000
-
 
 def main():
     wallet_address, export_format, txid, options = report_util.parse_args(TICKER_LUNA)
-    _read_options(options)
 
     if txid:
+        _read_options(options)
         exporter = txone(wallet_address, txid)
         exporter.export_print()
+        if export_format != FORMAT_DEFAULT:
+            report_util.export_format_for_txid(exporter, export_format, txid)
     else:
-        exporter = txhistory(wallet_address)
+        exporter = txhistory(wallet_address, options)
         report_util.run_exports(TICKER_LUNA, wallet_address, exporter, export_format)
 
 
 def _read_options(options):
-    if not options:
-        return
     report_util.read_common_options(localconfig, options)
 
-    localconfig.lp_transfers = options.get("lp_transfers", False)
-    localconfig.lp_trades = options.get("lp_trades", False)
+    localconfig.lp_treatment = options.get("lp_treatment", LP_TREATMENT_TRANSFERS)
     localconfig.minor_rewards = options.get("minor_rewards", False)
     logging.info("localconfig: %s", localconfig.__dict__)
 
@@ -69,9 +67,11 @@ def txone(wallet_address, txid):
     pprint.pprint(data)
     print("")
 
-    exporter = Exporter(wallet_address)
-    terra.processor.process_tx(wallet_address, data, exporter)
+    exporter = Exporter(wallet_address, localconfig, TICKER_LUNA)
+    txinfo = terra.processor.process_tx(wallet_address, data, exporter)
+    txinfo.print()
     print("")
+
     return exporter
 
 
@@ -80,7 +80,7 @@ def estimate_duration(wallet_address):
 
 
 def _max_queries():
-    max_txs = localconfig.limit if localconfig.limit else MAX_TRANSACTIONS
+    max_txs = localconfig.limit
     max_queries = math.ceil(max_txs / LIMIT_FCD)
     logging.info("max_txs: %s, max_queries: %s", max_txs, max_queries)
     return max_queries
@@ -88,7 +88,7 @@ def _max_queries():
 
 def _num_txs(wallet_address):
     num_txs = 0
-    figment_max_queries = math.ceil(MAX_TRANSACTIONS / LIMIT_FIGMENT)
+    figment_max_queries = math.ceil(localconfig.limit / LIMIT_FIGMENT)
 
     for _ in range(figment_max_queries):
         logging.info("estimate_duration() loop num_txs=%s", num_txs)
@@ -102,15 +102,9 @@ def _num_txs(wallet_address):
     return num_txs
 
 
-def txhistory(wallet_address, job=None, options=None):
-    progress = ProgressTerra()
-    exporter = Exporter(wallet_address)
-
-    if options:
-        _read_options(options)
-    if job:
-        localconfig.job = job
-        localconfig.cache = True
+def txhistory(wallet_address, options):
+    # Configure localconfig based on options
+    _read_options(options)
     if localconfig.cache:
         cache = Cache()
         _cache_load(cache)
@@ -119,6 +113,10 @@ def txhistory(wallet_address, job=None, options=None):
             logging.info("Could not initialize mongodb cache ...")
         else:
             logging.info("Chache txs and contracts to mongodb ...")
+
+    progress = ProgressTerra()
+    exporter = Exporter(wallet_address, localconfig, TICKER_LUNA)
+
     if TERRA_FIGMENT_KEY:
         # Optional: Fetch count of transactions to estimate progress more accurately later
         num_txs = _num_txs(wallet_address)
@@ -145,6 +143,7 @@ def _cache_load(cache):
     localconfig.currency_addresses = cache.get_terra_currency_addresses()
     localconfig.decimals = cache.get_terra_decimals()
     localconfig.lp_currency_addresses = cache.get_terra_lp_currency_addresses()
+
     logging.info("_cache_load(): downloaded data from cache ...")
 
 
@@ -153,6 +152,7 @@ def _cache_push(cache):
     cache.set_terra_currency_addresses(localconfig.currency_addresses)
     cache.set_terra_decimals(localconfig.decimals)
     cache.set_terra_lp_currency_addresses(localconfig.lp_currency_addresses)
+
     logging.info("_cache_push(): push data to cache")
 
 
@@ -183,7 +183,7 @@ def _get_txs(wallet_address, progress):
         else:
             out.extend(result)
             
-        if len(result) == LIMIT_FCD and "next" in data:
+        if data.get("next", None):
             offset = data["next"]
         else:
             break

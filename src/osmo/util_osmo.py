@@ -2,7 +2,7 @@ import logging
 
 import osmo.api_historical
 from osmo.config_osmo import localconfig
-from osmo.constants import CUR_CRO, EXP18, MILLION, MSG_TYPE_BEGIN_UNLOCKING, MSG_TYPE_LOCK_TOKENS
+import osmo.constants as co
 
 
 def _transfers(log, wallet_address):
@@ -68,6 +68,9 @@ def _transfers_event(log, wallet_address):
                 recipient = attributes[i]["value"]
                 sender = attributes[i + 1]["value"]
                 amount_string = attributes[i + 2]["value"]
+                if not amount_string:
+                    # Handle rare case for empty string
+                    continue
 
                 if recipient == wallet_address:
                     for amount, currency in _amount_currency(amount_string):
@@ -113,21 +116,16 @@ def _amount_currency(amount_string):
 
 def _amount(uamount, currency):
     if currency.startswith("GAMM-"):
-        return float(uamount) / EXP18
-    elif currency == CUR_CRO:
-        return float(uamount) / MILLION / 100
+        return float(uamount) / co.EXP18
+    elif currency == co.CUR_CRO:
+        return float(uamount) / co.MILLION / 100
     else:
-        return float(uamount) / MILLION
+        return float(uamount) / co.MILLION
 
 
 def _denom_to_currency(denom):
     # i.e. "uosmo"
     return denom[1:].upper()
-
-
-class NoSymbol:
-
-    ibc_addresses = set()
 
 
 def _ibc_currency(ibc_address):
@@ -170,23 +168,13 @@ def _ingest_rows(exporter, rows, comment):
 def _period_lock_id(msginfo):
     msg_index = msginfo.msg_index
     log = msginfo.log
-    msg_type = _msg_type(msginfo)
-
-    # Determine type to lookup when parsing events
-    if msg_type == MSG_TYPE_LOCK_TOKENS:
-        event_type_target = "lock_tokens"
-    elif msg_type == MSG_TYPE_BEGIN_UNLOCKING:
-        event_type_target = "begin_unlock"
-    else:
-        logging.critical("_period_lock_id(): Unexpected msg_type=%s", msg_type)
-        return ""
 
     # Extract period_lock_id value from events
     for event in log["events"]:
         event_type = event["type"]
         attributes = event["attributes"]
 
-        if event_type == event_type_target:
+        if event_type in ["lock_tokens", "begin_unlock", "add_tokens_to_lock"]:
             for kv in attributes:
                 k, v = kv["key"], kv["value"]
                 if k == "period_lock_id":

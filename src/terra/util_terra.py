@@ -4,11 +4,10 @@ import base64
 import json
 import logging
 
-import common.ibc_tokens
-from settings_csv import TICKER_LUNA
+from settings_csv import TERRA_LCD_NODE
 from terra.api_lcd import LcdAPI
 from terra.config_terra import localconfig
-from terra.constants import CUR_ORION, IBC_TOKEN_NAMES
+import common.ibc.api_lcd
 
 
 def _contracts(elem):
@@ -21,7 +20,13 @@ def _contracts(elem):
 
 
 def _contract(elem, index=0):
-    return elem["tx"]["value"]["msg"][index]["value"]['contract']
+    msg = elem["tx"]["value"]["msg"][index]
+    return msg["value"].get("contract", None)
+
+
+def _any_contracts(addrs, elem):
+    contracts = set([c for c in _contracts(elem) if c is not None])
+    return len(set(addrs).intersection(contracts)) > 0
 
 
 def _execute_msgs(elem):
@@ -47,6 +52,13 @@ def _execute_msgs_keys(elem):
 
 
 def _execute_msg(elem, index=0):
+    msg = _execute_msg_field(elem, index)
+    if "ledger_proxy" in msg and "msg" in msg["ledger_proxy"]:
+        return msg["ledger_proxy"]["msg"]
+    return msg
+
+
+def _execute_msg_field(elem, index=0):
     msg_base64 = elem["tx"]["value"]["msg"][index]["value"]["execute_msg"]
     if type(msg_base64) is dict:
         return msg_base64
@@ -55,9 +67,41 @@ def _execute_msg(elem, index=0):
 
     for k, v in msg.items():
         if "msg" in v:
-            msg[k]["msg"] = json.loads(base64.b64decode(v["msg"]))
+            try:
+                msg[k]["msg"] = json.loads(base64.b64decode(v["msg"]))
+            except UnicodeDecodeError as e:
+                msg[k]["msg"] = {"error_decoding": {}}
 
     return msg
+
+
+def _multi_transfers(elem, wallet_address, txid):
+    transfers_in = []
+    transfers_out = []
+
+    for log_index, log in enumerate(elem["logs"]):
+        events = elem["logs"][log_index].get("events", [])
+        for event in events:
+            if event["type"] == "message":
+                attributes = event["attributes"]
+                for i in range(0, len(attributes)):
+                    if attributes[i]["key"] == "sender":
+                        sender = attributes[i]["value"]
+
+            if event["type"] == "transfer":
+                attributes = event["attributes"]
+
+                for i in range(0, len(attributes), 2):
+                    recipient = attributes[i]["value"]
+                    amount_string = attributes[i + 1]["value"]
+
+                    if recipient == wallet_address:
+                        amount, currency = _amount(amount_string)
+                        transfers_in.append([amount, currency])
+                    elif sender == wallet_address:
+                        amount, currency = _amount(amount_string)
+                        transfers_out.append([amount, currency])
+    return transfers_in, transfers_out
 
 
 def _transfers(elem, wallet_address, txid, multicurrency=False):
@@ -66,33 +110,45 @@ def _transfers(elem, wallet_address, txid, multicurrency=False):
     is_columbus_3 = (elem.get("chainId", None) == "columbus-3")
     if is_columbus_3:
         return _transfers_columbus_3(elem, wallet_address, txid, multicurrency)
+    logs = elem["logs"]
 
-    for log_index, log in enumerate(elem["logs"]):
-        events = elem["logs"][log_index]["events"]
+    for log in logs:
+        cur_transfers_in, cur_transfers_out = _transfers_log(log, wallet_address, multicurrency)
 
-        for event in events:
-            if event["type"] == "transfer":
-                attributes = event["attributes"]
+        transfers_in.extend(cur_transfers_in)
+        transfers_out.extend(cur_transfers_out)
 
-                for i in range(0, len(attributes), 3):
-                    recipient = attributes[i]["value"]
-                    sender = attributes[i + 1]["value"]
-                    amount_string = attributes[i + 2]["value"]
+    return transfers_in, transfers_out
 
-                    if recipient == wallet_address:
-                        if multicurrency:
-                            for amount, currency in _amounts(amount_string):
-                                transfers_in.append([amount, currency])
-                        else:
-                            amount, currency = _amount(amount_string)
+
+def _transfers_log(log, wallet_address, multicurrency=False):
+    transfers_in = []
+    transfers_out = []
+    events = log.get("events", [])
+
+    for event in events:
+        if event["type"] == "transfer":
+            attributes = event["attributes"]
+
+            for i in range(0, len(attributes), 3):
+                recipient = attributes[i]["value"]
+                sender = attributes[i + 1]["value"]
+                amount_string = attributes[i + 2]["value"]
+
+                if recipient == wallet_address:
+                    if multicurrency:
+                        for amount, currency in _amounts(amount_string):
                             transfers_in.append([amount, currency])
-                    elif sender == wallet_address:
-                        if multicurrency:
-                            for amount, currency in _amounts(amount_string):
-                                transfers_out.append([amount, currency])
-                        else:
-                            amount, currency = _amount(amount_string)
+                    else:
+                        amount, currency = _amount(amount_string)
+                        transfers_in.append([amount, currency])
+                elif sender == wallet_address:
+                    if multicurrency:
+                        for amount, currency in _amounts(amount_string):
                             transfers_out.append([amount, currency])
+                    else:
+                        amount, currency = _amount(amount_string)
+                        transfers_out.append([amount, currency])
 
     return transfers_in, transfers_out
 
@@ -153,7 +209,7 @@ def _extract_amounts(amount_string):
             uamount, ibc_address = amount.split("ibc")
             ibc_address = "ibc" + ibc_address
 
-            currency = common.ibc_tokens.get_symbol(localconfig, TICKER_LUNA, ibc_address)
+            currency = common.ibc.api_lcd.get_ibc_ticker(TERRA_LCD_NODE, ibc_address, localconfig.ibc_addresses)
             out[currency] = _float_amount(uamount, currency)
         else:
             # regular (i.e. 99700703uusd)
@@ -220,7 +276,10 @@ def _denom_to_currency(denom):
 
 def _decimals(currency):
     # default is 6 decimals
-    if currency in localconfig.decimals and localconfig.decimals[currency]:
+    if currency == "LUNA":
+        # temporary fix
+        return 6
+    elif currency in localconfig.decimals and localconfig.decimals[currency]:
         return int(localconfig.decimals[currency])
     else:
         return 6
@@ -242,6 +301,10 @@ def _lookup_address(addr, txid):
 
     if "symbol" in init_msg:
         currency = init_msg["symbol"]
+
+        if currency == "uLP":
+            currency = _lookup_lp_address(addr, txid)
+
         decimals = int(init_msg["decimals"])
 
         # Cache result
@@ -277,6 +340,9 @@ def _lookup_lp_address(addr, txid):
     elif "mint" in init_msg:
         address_for_pair = init_msg["mint"]["minter"]
         currency1, currency2 = _query_lp_address(address_for_pair, txid)
+    elif "mirror_token" in init_msg:
+        currency1 = "UST"
+        currency2 = "MIR"
     else:
         raise Exception("Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
 
@@ -340,12 +406,6 @@ def _init_msg(data):
     return init_msg
 
 
-def _ibc_token_name(address):
-    # ibc/0471F1C4E7AFD3F07702BEF6DC365268D64570F7C1FDC98EA6098DD6DE59817B -> "OSMO"
-    #cur = util_osmo._ibc_currency(address)
-    return IBC_TOKEN_NAMES.get(address, address)
-
-
 def _event_with_action(elem, event_type, action):
     logs = elem["logs"]
     for log in logs:
@@ -356,9 +416,33 @@ def _event_with_action(elem, event_type, action):
     return None
 
 
-def _ingest_rows(exporter, rows, comment):
+def _events_with_action(elem, event_type, action):
+    events = []
+    logs = elem["logs"]
+    for log in logs:
+        event = log["events_by_type"].get(event_type, None)
+        if event:
+            if action in event["action"]:
+                events.append(event)
+    return events
+
+
+def _ingest_rows(exporter, rows, comment=None):
     for i, row in enumerate(rows):
-        row.comment = comment
+        if comment:
+            row.comment = comment
         if i > 0:
             row.fee, row.fee_currency = "", ""
         exporter.ingest_row(row)
+
+
+def _add_anchor_fees(elem, txid, row):
+    # Extract fee, if any, paid by anchor market contract to fee collector
+    fee_collector_address = "terra17xpfvakm2amg962yls6f84z3kell8c5lkaeqfa"
+    fee_transfers_in, _ = _transfers(elem, fee_collector_address, txid)
+
+    if len(fee_transfers_in) > 0:
+        fee_amount, fee_currency = fee_transfers_in[0]
+        row.fee += fee_amount
+
+    return row

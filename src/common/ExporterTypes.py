@@ -2,10 +2,15 @@
 FORMAT_DEFAULT = "default"
 FORMAT_BALANCES = "balances"
 FORMAT_ACCOINTING = "accointing"
+FORMAT_BITCOINTAX = "bitcointax"
+FORMAT_COINLEDGER = "coinledger"
+FORMAT_COINPANDA = "coinpanda"
 FORMAT_COINTRACKING = "cointracking"
 FORMAT_COINTRACKER = "cointracker"
+FORMAT_CRYPTOCOM = "cryptocom"
 FORMAT_CRYPTOTAXCALCULATOR = "cryptotaxcalculator"
 FORMAT_KOINLY = "koinly"
+FORMAT_RECAP = "recap"
 FORMAT_TAXBIT = "taxbit"
 FORMAT_TOKENTAX = "tokentax"
 FORMAT_ZENLEDGER = "zenledger"
@@ -13,16 +18,30 @@ FORMATS = [
     FORMAT_DEFAULT,
     FORMAT_BALANCES,
     FORMAT_ACCOINTING,
+    FORMAT_BITCOINTAX,
+    FORMAT_COINLEDGER,
+    FORMAT_COINPANDA,
     FORMAT_COINTRACKING,
     FORMAT_COINTRACKER,
+    FORMAT_CRYPTOCOM,
     FORMAT_CRYPTOTAXCALCULATOR,
     FORMAT_KOINLY,
+    FORMAT_RECAP,
     FORMAT_TAXBIT,
     FORMAT_TOKENTAX,
     FORMAT_ZENLEDGER
 ]
 
-#
+# Other
+LP_TREATMENT_TRANSFERS = "transfers"
+LP_TREATMENT_OMIT = "omit"
+LP_TREATMENT_TRADES = "trades"
+LP_TREATMENT_CHOICES = [
+    LP_TREATMENT_TRANSFERS,
+    LP_TREATMENT_OMIT,
+    LP_TREATMENT_TRADES
+]
+LP_TREATMENT_DEFAULT = LP_TREATMENT_TRANSFERS
 
 # Note: TX_TYPE=_* means transaction is not included in non-default CSVs
 # (i.e. _STAKING_DELEGATE is not included in koinly, cointracking, ... )
@@ -42,10 +61,10 @@ TX_TYPE_FEE = "FEE"
 TX_TYPE_EXPENSE = "EXPENSE"
 TX_TYPE_FEE_SETTLEMENT = "FEE_SETTLEMENT"
 TX_TYPE_FEE_BORROWING = "FEE_BORROWING"
+TX_TYPE_LP_DEPOSIT = "LP_DEPOSIT"    # note: only koinly has export; others treat as transfer
+TX_TYPE_LP_WITHDRAW = "LP_WITHDRAW"  # note: only koinly has export; others treat as transfer
 
 # Common non-exportable transactions
-TX_TYPE_LP_DEPOSIT = "_LP_DEPOSIT"
-TX_TYPE_LP_WITHDRAW = "_LP_WITHDRAW"
 TX_TYPE_UNKNOWN = "_UNKNOWN"
 TX_TYPE_UNKNOWN_ERROR = "_UNKNOWN_ERROR"
 TX_TYPE_STAKING_DELEGATE = "_STAKING_DELEGATE"
@@ -53,6 +72,7 @@ TX_TYPE_STAKING_UNDELEGATE = "_STAKING_UNDELEGATE"
 TX_TYPE_STAKING_REDELEGATE = "_STAKING_REDELEGATE"
 TX_TYPE_STAKING_WITHDRAW_REWARD = "_STAKING_WITHDRAW_REWARD"
 TX_TYPE_FAILED = "_FAILED"
+TX_TYPE_NOOP = "_NOOP"
 
 # ### LUNA ##########################################################################################
 
@@ -64,6 +84,7 @@ TX_TYPE_GOV_UNSTAKE = "_GOV_UNSTAKE"
 # mirror protocol lp
 TX_TYPE_LP_STAKE = "_LP_STAKE"
 TX_TYPE_LP_UNSTAKE = "_LP_UNSTAKE"
+TX_TYPE_DISTRIBUTE = "_DISTRIBUTE"
 
 # anchor earn
 TX_TYPE_EARN_DEPOSIT = "_EARN_DEPOSIT"
@@ -80,16 +101,33 @@ TX_TYPE_DEPOSIT_COLLATERAL = "_DEPOSIT_COLLATERAL"
 TX_TYPE_WITHDRAW_COLLATERAL = "_WITHDRAW_COLLATERAL"
 # borrow/repay in "common exportable transactions"
 
+# anchor liquidate
+TX_TYPE_SUBMIT_BID = "_SUBMIT_BID"
+TX_TYPE_RETRACT_BID = "_RETRACT_BID"
+
+# MIR
+TX_TYPE_SUBMIT_LIMIT_ORDER = "_SUBMIT_LIMIT_ORDER"
+
 # LOTA
 TX_TYPE_LOTA_UNKNOWN = "_LOTA_UNKNOWN"
+
+# SPEC
+TX_TYPE_SPEC_UNKNOWN = "_SPEC_UNKNOWN"
+
+# ASTROPORT
+TX_TYPE_ASTROPORT_UNKNOWN = "_ASTROPORT_UNKNOWN"
+
+# VALKYRIE
+TX_TYPE_VALKYRIE_UNKNOWN = "_VALKYRIE_UNKNOWN"
 
 # nft
 TX_TYPE_NFT_WHITELIST = "_NFT_WHITELIST"
 TX_TYPE_NFT_MINT = "_NFT_MINT"
 TX_TYPE_NFT_OFFER_SELL = "_NFT_OFFER_SELL"
+TX_TYPE_NFT_OFFER_BUY = "_NFT_OFFER_BUY"
 TX_TYPE_NFT_WITHDRAW = "_NFT_WITHDRAW"
 TX_TYPE_NFT_DEPOSIT = "_NFT_DEPOSIT"
-
+TX_TYPE_NFT_CANCEL_ORDER = "_NFT_CANCEL_ORDER"
 
 # ### SOL ##########################################################################################
 
@@ -135,7 +173,7 @@ TX_TYPES_CSVEXPORT = [
     TX_TYPE_REPAY,
     TX_TYPE_FEE,
     TX_TYPE_FEE_SETTLEMENT,
-    TX_TYPE_FEE_BORROWING,
+    TX_TYPE_FEE_BORROWING
 ]
 
 # Types with taxable=True
@@ -144,18 +182,20 @@ TX_TYPES_TAXABLE = [
     TX_TYPE_AIRDROP,
     TX_TYPE_TRADE,
     TX_TYPE_SPEND,
-    TX_TYPE_INCOME
+    TX_TYPE_INCOME,
+    TX_TYPE_LP_DEPOSIT,
+    TX_TYPE_LP_WITHDRAW
 ]
 
 # stake.tax csv format
 ROW_FIELDS = [
-    "timestamp", "tx_type", "taxable", "received_amount", "received_currency",
+    "timestamp", "tx_type", "received_amount", "received_currency",
     "sent_amount", "sent_currency", "fee", "fee_currency", "comment", "txid",
     "url", "exchange", "wallet_address"
 ]
 
 # fields used for unit testing
-TEST_ROW_FIELDS = ["timestamp", "tx_type", "taxable", "received_amount", "received_currency",
+TEST_ROW_FIELDS = ["timestamp", "tx_type", "received_amount", "received_currency",
                    "sent_amount", "sent_currency", "fee", "fee_currency", "txid"]
 
 # cointracking csv format: https://cointracking.info/import/import_csv/
@@ -217,6 +257,41 @@ CR_FIELDS = [
     CR_FIELD_DATE, CR_FIELD_RECEIVED_QUANTITY, CR_FIELD_RECEIVED_CURRENCY,
     CR_FIELD_SENT_QUANTITY, CR_FIELD_SENT_CURRENCY, CR_FIELD_FEE_AMOUNT,
     CR_FIELD_FEE_CURRENCY, CR_FIELD_TAG, CR_FIELD_TRANSACTION_ID
+]
+
+# coinledger format
+CL_FIELD_DATE = "Date (UTC)"
+CL_FIELD_PLATFORM = "Platform (Optional)"
+CL_FIELD_ASSET_SENT = "Asset Sent"
+CL_FIELD_AMOUNT_SENT = "Amount Sent"
+CL_FIELD_ASSET_RECEIVED = "Asset Received"
+CL_FIELD_AMOUNT_RECEIVED = "Amount Received"
+CL_FEE_CURRENCY = "Fee Currency (Optional)"
+CL_FEE_AMOUNT = "Fee Amount (Optional)"
+CL_TYPE = "Type"
+CL_DESCRIPTION = "Description (Optional)"
+CL_TXHASH = "TxHash (Optional)"
+CL_FIELDS = [
+    CL_FIELD_DATE, CL_FIELD_PLATFORM, CL_FIELD_ASSET_SENT, CL_FIELD_AMOUNT_SENT, CL_FIELD_ASSET_RECEIVED,
+    CL_FIELD_AMOUNT_RECEIVED, CL_FEE_CURRENCY, CL_FEE_AMOUNT, CL_TYPE, CL_DESCRIPTION, CL_TXHASH
+]
+
+# tax.crypto.com format
+CRCOM_DATE = "Date"
+CRCOM_TYPE = "Type"
+CRCOM_RECEIVED_CURRENCY = "Received Currency"
+CRCOM_RECEIVED_AMOUNT = "Received Amount"
+CRCOM_RECEIVED_NET_WORTH = "Received Net Worth"
+CRCOM_SENT_CURRENCY = "Sent Currency"
+CRCOM_SENT_AMOUNT = "Sent Amount"
+CRCOM_SENT_NET_WORTH = "Sent Net Worth"
+CRCOM_FEE_CURRENCY = "Fee Currency"
+CRCOM_FEE_AMOUNT = "Fee Amount"
+CRCOM_FEE_NET_WORTH = "Fee Net Worth"
+CRCOM_FIELDS = [
+    CRCOM_DATE, CRCOM_TYPE, CRCOM_RECEIVED_CURRENCY, CRCOM_RECEIVED_AMOUNT, CRCOM_RECEIVED_NET_WORTH,
+    CRCOM_SENT_CURRENCY, CRCOM_SENT_AMOUNT, CRCOM_SENT_NET_WORTH, CRCOM_FEE_CURRENCY, CRCOM_FEE_AMOUNT,
+    CRCOM_FEE_NET_WORTH
 ]
 
 # koinly format
@@ -349,4 +424,78 @@ TAXBIT_FIELDS = [
     TAXBIT_FIELD_FEE_CURRENCY,
     TAXBIT_FIELD_EXCHANGE_TRANSACTION_ID,
     TAXBIT_FIELD_BLOCKCHAIN_TRANSACTION_HASH
+]
+
+# recap format
+RECAP_FIELD_TYPE = "Type"
+RECAP_FIELD_DATE = "Date"
+RECAP_FIELD_INORBUYAMOUNT = "InOrBuyAmount"
+RECAP_FIELD_INORBUYCURRENCY = "InOrBuyCurrency"
+RECAP_FIELD_OUTORSELLAMOUNT = "OutOrSellAmount"
+RECAP_FIELD_OUTORSELLCURRENCY = "OutOrSellCurrency"
+RECAP_FIELD_FEEAMOUNT = "FeeAmount"
+RECAP_FIELD_FEECURRENCY = "FeeCurrency"
+RECAP_FIELD_DESCRIPTION = "Description"  # Not an importable field.
+RECAP_FIELD_TXID = "Transaction ID"      # Not an importable field.
+RECAP_FIELDS = [
+    RECAP_FIELD_TYPE,
+    RECAP_FIELD_DATE,
+    RECAP_FIELD_INORBUYAMOUNT,
+    RECAP_FIELD_INORBUYCURRENCY,
+    RECAP_FIELD_OUTORSELLAMOUNT,
+    RECAP_FIELD_OUTORSELLCURRENCY,
+    RECAP_FIELD_FEEAMOUNT,
+    RECAP_FIELD_FEECURRENCY,
+    RECAP_FIELD_DESCRIPTION,
+    RECAP_FIELD_TXID
+]
+
+# bitcoin.tax format
+BTAX_FIELD_DATE = "Date"
+BTAX_FIELD_ACTION = "Action"
+BTAX_FIELD_SYMBOL = "Symbol"
+BTAX_FIELD_VOLUME = "Volume"
+BTAX_FIELD_CURRENCY = "Currency"
+BTAX_FIELD_TOTAL = "Total"
+BTAX_FIELD_FEE = "Fee"
+BTAX_FIELD_FEE_CURRENCY = "FeeCurrency"
+BTAX_FIELD_MEMO = "Memo"
+
+BTAX_FIELDS = [
+    BTAX_FIELD_DATE,
+    BTAX_FIELD_ACTION,
+    BTAX_FIELD_SYMBOL,
+    BTAX_FIELD_VOLUME,
+    BTAX_FIELD_CURRENCY,
+    BTAX_FIELD_TOTAL,
+    BTAX_FIELD_FEE,
+    BTAX_FIELD_FEE_CURRENCY,
+    BTAX_FIELD_MEMO,
+]
+
+# coinpanda format
+CP_FIELD_DATE = "Date"
+CP_FIELD_TYPE = "Type"
+CP_FIELD_SENT_AMOUNT = "Sent Amount"
+CP_FIELD_SENT_CURRENCY = "Sent Currency"
+CP_FIELD_RECEIVED_AMOUNT = "Received Amount"
+CP_FIELD_RECEIVED_CURRENCY = "Received Currency"
+CP_FIELD_FEE_AMOUNT = "Fee Amount"
+CP_FIELD_FEE_CURRENCY = "Fee Currency"
+CP_FIELD_LABEL = "Label"
+CP_FIELD_DESCRIPTION = "Description"
+CP_FIELD_TXHASH = "TxHash"
+
+CP_FIELDS = [
+    CP_FIELD_DATE,
+    CP_FIELD_TYPE,
+    CP_FIELD_SENT_AMOUNT,
+    CP_FIELD_SENT_CURRENCY,
+    CP_FIELD_RECEIVED_AMOUNT,
+    CP_FIELD_RECEIVED_CURRENCY,
+    CP_FIELD_FEE_AMOUNT,
+    CP_FIELD_FEE_CURRENCY,
+    CP_FIELD_LABEL,
+    CP_FIELD_DESCRIPTION,
+    CP_FIELD_TXHASH,
 ]
