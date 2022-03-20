@@ -10,11 +10,13 @@ ALGO_HIST_INDEXER_NODE = os.environ.get("ALGO_HIST_INDEXER_NODE", "https://index
 CRONOS_NODE = os.environ.get("CRONOS_NODE", "https://crypto.org/explorer/api")
 SECRET_NODE = os.environ.get("SECRET_NODE", "https://api-secret.cosmostation.io")
 BITSONG_NODE = os.environ.get("BITSONG_NODE", "https://api-bitsong.cosmostation.io")
+COVALENT_NODE = os.environ.get("COVALENT_NODE", "https://api.covalenthq.com")
 FET_NODE = os.environ.get("FET_NODE", "https://rest-fetchhub.fetch.ai")
 HUAHUA_NODE = os.environ.get("HUAHUA_NODE", "")
 JUNO_NODE = os.environ.get("JUNO_NODE", "")
 
 # Optional environment variables
+COVALENT_API_KEY = os.environ.get("COVALENT_API_KEY", "")
 TERRA_FIGMENT_KEY = os.environ.get("TERRA_FIGMENT_KEY", "")
 
 # #############################################################################
