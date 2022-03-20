@@ -148,7 +148,7 @@ def _extract_collateral_amounts(txid, from_contract, asset_field):
     return out
 
 
-def handle_lp_stake(exporter, elem, txinfo):
+def handle_lp_stake(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
 
     # Determine LP currency
@@ -158,17 +158,17 @@ def handle_lp_stake(exporter, elem, txinfo):
         raise Exception("Bad condition handle_lp_stake() txid=%s", txid)
 
     # Determine LP amount
-    execute_msg = util_terra._execute_msg(elem)
+    execute_msg = util_terra._execute_msg(elem, index)
     lp_amount = util_terra._float_amount(execute_msg["send"]["amount"], lp_currency)
 
     row = make_lp_stake_tx(txinfo, lp_amount, lp_currency)
     exporter.ingest_row(row)
 
 
-def handle_lp_stake_deposit_strategy(exporter, elem, txinfo):
+def handle_lp_stake_deposit_strategy(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
     from_contract = util_terra._event_with_action(elem, "from_contract", "deposit_to_strategy")
-    execute_msg = util_terra._execute_msg(elem)
+    execute_msg = util_terra._execute_msg(elem, index)
 
     # Determine LP currency
     lp_currency_address = from_contract["lp_token"][0]
@@ -181,11 +181,11 @@ def handle_lp_stake_deposit_strategy(exporter, elem, txinfo):
     exporter.ingest_row(row)
 
 
-def handle_lp_unstake(exporter, elem, txinfo):
+def handle_lp_unstake(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
 
     # Determine LP currency
-    lp_currency_address = elem["logs"][0]["events_by_type"]["execute_contract"]["contract_address"][0]
+    lp_currency_address = elem["logs"][index]["events_by_type"]["execute_contract"]["contract_address"][0]
     lp_currency = util_terra._lookup_lp_address(lp_currency_address, txid)
     if not lp_currency:
         raise Exception("Bad condition handle_lp_stake() txid=%s", txid)

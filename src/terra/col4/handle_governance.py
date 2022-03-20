@@ -3,10 +3,10 @@ from terra import util_terra
 from terra.make_tx import make_gov_stake_tx, make_gov_unstake_tx
 
 
-def handle_governance_stake(exporter, elem, txinfo):
+def handle_governance_stake(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
 
-    amount, currency = _extract_amount(elem, txid, "send")
+    amount, currency = _extract_amount(elem, txid, "send", index)
     if amount and currency:
         row = make_gov_stake_tx(txinfo, amount, currency)
         exporter.ingest_row(row)
@@ -15,10 +15,10 @@ def handle_governance_stake(exporter, elem, txinfo):
         exporter.ingest_row(row)
 
 
-def handle_governance_unstake(exporter, elem, txinfo):
+def handle_governance_unstake(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
 
-    amount, currency = _extract_amount(elem, txid, "transfer")
+    amount, currency = _extract_amount(elem, txid, "transfer", index)
     if amount and currency:
         row = make_gov_unstake_tx(txinfo, amount, currency)
         exporter.ingest_row(row)
@@ -39,8 +39,8 @@ def handle_governance_reward(exporter, elem, txinfo):
         exporter.ingest_row(row)
 
 
-def _extract_amount(elem, txid, target_action):
-    from_contract = elem["logs"][0]["events_by_type"]["from_contract"]
+def _extract_amount(elem, txid, target_action, index=0):
+    from_contract = elem["logs"][index]["events_by_type"]["from_contract"]
 
     try:
         actions = from_contract["action"]

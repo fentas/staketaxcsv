@@ -129,6 +129,9 @@ TX_TYPE_NFT_WITHDRAW = "_NFT_WITHDRAW"
 TX_TYPE_NFT_DEPOSIT = "_NFT_DEPOSIT"
 TX_TYPE_NFT_CANCEL_ORDER = "_NFT_CANCEL_ORDER"
 
+# Pylon
+TX_TYPE_LOCKUP = "_LOCKUP"
+
 # ### SOL ##########################################################################################
 
 TX_TYPE_SOL_STAKING_SPLIT = "_STAKING_SPLIT"

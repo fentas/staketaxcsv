@@ -61,6 +61,13 @@ def _execute_msg(elem, index=0):
 def _execute_msg_field(elem, index=0):
     msg_base64 = elem["tx"]["value"]["msg"][index]["value"]["execute_msg"]
     if type(msg_base64) is dict:
+        for k, v in msg_base64.items():
+            if "msg" in v:
+                try:
+                    # brute force decode msg - somtimes it is base64 decoded
+                    msg_base64[k]["msg"] = json.loads(base64.b64decode(v["msg"]))
+                except Exception:
+                    pass
         return msg_base64
 
     msg = json.loads(base64.b64decode(msg_base64))
@@ -126,14 +133,32 @@ def _transfers_log(log, wallet_address, multicurrency=False):
     transfers_out = []
     events = log.get("events", [])
 
+    # check message if multisend
+    multisend = False
+    sender = ""
+    steps = 3
+    for event in events:
+        if event["type"] == "message":
+            if event["attributes"][0]["value"] == "/cosmos.bank.v1beta1.MsgMultiSend":
+                multisend = True
+                sender = event["attributes"][1]["value"]
+                steps = 2
+            break
+
     for event in events:
         if event["type"] == "transfer":
             attributes = event["attributes"]
 
-            for i in range(0, len(attributes), 3):
-                recipient = attributes[i]["value"]
-                sender = attributes[i + 1]["value"]
-                amount_string = attributes[i + 2]["value"]
+            for i in range(0, len(attributes), steps):
+                recipient = ""
+                amount_string = ""
+                if multisend:
+                    recipient = attributes[i]["value"]
+                    amount_string = attributes[i + 1]["value"]
+                else:
+                    recipient = attributes[i]["value"]
+                    sender = attributes[i + 1]["value"]
+                    amount_string = attributes[i + 2]["value"]
 
                 if recipient == wallet_address:
                     if multicurrency:
@@ -296,6 +321,7 @@ def _lookup_address(addr, txid):
     #if addr in localconfig.currency_addresses:
     #    return localconfig.currency_addresses[addr]
 
+    print(addr)
     init_msg = _query_wasm(addr)
     #logging.info("init_msg: %s", init_msg)
 
@@ -392,6 +418,7 @@ def _query_lp_address(addr, txid):
 
 def _query_wasm(addr):
     data = LcdAPI.contract_info(addr)
+    print(data)
 
     init_msg = _init_msg(data)
     return init_msg

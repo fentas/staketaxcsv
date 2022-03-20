@@ -292,17 +292,17 @@ class Exporter:
     def export_cointracking_csv(self, csvpath):
         """ Write CSV, suitable for import into cointracking.info """
         cointracking_types = {
-            TX_TYPE_AIRDROP: "Airdrop",
-            TX_TYPE_STAKING: "Staking",
-            TX_TYPE_TRADE: "Trade",
-            TX_TYPE_TRANSFER: et.TX_TYPE_TRANSFER,
-            TX_TYPE_INCOME: "Income",
-            TX_TYPE_SPEND: "Spend",
-            TX_TYPE_BORROW: "Income (non taxable)",
-            TX_TYPE_REPAY: "Expense (non taxable)",
-            TX_TYPE_FEE: "Other Fee",
-            TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
-            TX_TYPE_FEE_BORROWING: "Borrowing Fee",
+            et.TX_TYPE_AIRDROP: "Airdrop",
+            et.TX_TYPE_STAKING: "Staking",
+            et.TX_TYPE_TRADE: "Trade",
+            et.TX_TYPE_TRANSFER: et.TX_TYPE_TRANSFER,
+            et.TX_TYPE_INCOME: "Income",
+            et.TX_TYPE_SPEND: "Spend",
+            et.TX_TYPE_BORROW: "Income (non taxable)",
+            et.TX_TYPE_REPAY: "Expense (non taxable)",
+            et.TX_TYPE_FEE: "Other Fee",
+            et.TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
+            et.TX_TYPE_FEE_BORROWING: "Borrowing Fee",
         }
         rows = self._rows_export(et.FORMAT_COINTRACKING)
 

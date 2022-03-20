@@ -166,7 +166,7 @@ def _execute_type(elem, txinfo, index=0):
             return EXECUTE_TYPE_WITHDRAW
     elif "execute_swap_operations" in execute_msg:
         return EXECUTE_TYPE_EXECUTE_SWAP_OPERATIONS
-    elif "cast_vote" in execute_msg:
+    elif "cast_vote" in execute_msg or "poll" in execute_msg:
         return EXECUTE_TYPE_CAST_VOTE
     elif "borrow_stable" in execute_msg:
         return EXECUTE_TYPE_BORROW_STABLE

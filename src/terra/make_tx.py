@@ -21,6 +21,7 @@ from common.ExporterTypes import (
     TX_TYPE_UNBOND_INSTANT,
     TX_TYPE_UNBOND_WITHDRAW,
     TX_TYPE_WITHDRAW_COLLATERAL,
+    TX_TYPE_LOCKUP,
 )
 from common.make_tx import _make_tx_exchange, _make_tx_received, _make_tx_sent, make_simple_tx
 from terra.constants import CUR_LUNA
@@ -180,6 +181,9 @@ def make_nft_deposit(txinfo, sent_amount, sent_currency):
     row = _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_NFT_DEPOSIT)
     row.comment = "deposit for nft mint"
     return row
+
+def make_lockup_tx(txinfo, sent_amount, sent_currency):
+    return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_LOCKUP)
 
 
 def _mint_comment(name):

@@ -21,7 +21,8 @@ from terra.col4.handle_transfer import handle_transfer, handle_multi_transfer, h
 import terra.col4.handle
 import terra.col5.handle
 
-import terra.contracts.anchor as a
+from terra.data import named_address
+
 
 # execute_type -> tx_type mapping for generic transactions with no tax details
 EXECUTE_TYPES_SIMPLE = {
@@ -47,6 +48,12 @@ def process_tx(wallet_address, elem, exporter):
     if "code" in elem:
         return handle_failed_tx(exporter, elem, txinfo)
 
+    # Single action transactions
+    # goes through logs (all transactsions)
+    # so if processed multiple times it would duplicate transactions
+    msgtype = elem["tx"]["value"]["msg"][0]["type"]
+
+    skip = []
     index = -1
     for msg in elem["tx"]["value"]["msg"]:
         index += 1
@@ -54,24 +61,41 @@ def process_tx(wallet_address, elem, exporter):
         # filter parts of tranaction
         msgtype = msg["type"]
 
+        if msgtype in skip:
+            continue
+
+        if msgtype == "bank/MsgMultiSend":
+            skip.append(msgtype)
+            handle_multi_transfer(exporter, elem, txinfo)
+            continue
+        if msgtype == "cosmos-sdk/MsgTransfer":
+            skip.append(msgtype)
+            handle_ibc_transfer(exporter, elem, txinfo)
+            continue
+        if msgtype == "ibc/MsgUpdateClient":
+            skip.append(msgtype)
+            handle_ibc_transfer(exporter, elem, txinfo)
+            continue
+        if msgtype == "market/MsgSwap":
+            handle_swap_msgswap(exporter, elem, txinfo)
+            skip.append(msgtype)
+            continue
+        if msgtype in ["staking/MsgDelegate", "distribution/MsgWithdrawDelegationReward",
+                        "staking/MsgBeginRedelegate", "staking/MsgUndelegate"]:
+            skip.append(msgtype)
+            # LUNA staking reward
+            handle_reward(exporter, elem, txinfo, msgtype)
+            continue
+
         try:
             if msgtype == "bank/MsgSend":
-                handle_transfer(exporter, elem, txinfo)
-            elif msgtype == "bank/MsgMultiSend":
-                handle_multi_transfer(exporter, elem, txinfo)
-            elif msgtype == "cosmos-sdk/MsgTransfer":
-                handle_ibc_transfer(exporter, elem, txinfo)
-            elif msgtype == "ibc/MsgUpdateClient":
-                handle_ibc_transfer(exporter, elem, txinfo)
-            elif msgtype in ["gov/MsgVote", "gov/MsgDeposit", "gov/MsgSubmitProposal"]:
-                handle_simple(exporter, txinfo, TX_TYPE_GOV)
-            elif msgtype == "market/MsgSwap":
-                handle_swap_msgswap(exporter, elem, txinfo)
-            elif msgtype in ["staking/MsgDelegate", "distribution/MsgWithdrawDelegationReward",
-                            "staking/MsgBeginRedelegate", "staking/MsgUndelegate"]:
-                # LUNA staking reward
-                handle_reward(exporter, elem, txinfo, msgtype)
-            elif msgtype == "wasm/MsgExecuteContract":
+                handle_transfer(exporter, elem, txinfo, index)
+                continue
+            if msgtype in ["gov/MsgVote", "gov/MsgDeposit", "gov/MsgSubmitProposal"]:
+                handle_simple(exporter, txinfo, TX_TYPE_GOV, index)
+                continue
+
+            if msgtype == "wasm/MsgExecuteContract":
                 # upstream contracts handling
                 if terra.col5.handle.can_handle(exporter, elem, txinfo):
                     # THIS SHOULD BE FIRST CHOICE TO ADD NEW HANDLERS
@@ -93,9 +117,16 @@ def process_tx(wallet_address, elem, exporter):
                 if "send" in execute_msg and "contract" in execute_msg["send"]:
                     contract = execute_msg["send"]["contract"]
     
+                name = named_address(contract)
+                if name != "":
+                    txinfo.comment += f" contract {name}"
+
                 # Handle contracts
                 execute_type = None
                 info = contract_info(contract)
+                # print("!!!!!!!!!!!!!!")
+                # print(contract)
+                # print(info)
                 if info is not None:
                     protocol = info['protocol'].lower()
                     try:
@@ -107,7 +138,9 @@ def process_tx(wallet_address, elem, exporter):
 
                         # If no execute type is returned there nothing to do anymore
                         if execute_type is None:
-                            return
+                            continue
+                        if execute_type is False:
+                            break
 
                     except ModuleNotFoundError:
                         logging.warn("Not supported protocol %s ...", protocol)
@@ -134,7 +167,7 @@ def process_tx(wallet_address, elem, exporter):
                     ErrorCounter.increment("exception", txid)
                     handle_unknown(exporter, txinfo)
             else:
-                logging.error("Unknown msgtype for txid=%s", txid)
+                logging.error("Unknown msgtype for txid=%s msgtype=%s", txid, msgtype)
                 ErrorCounter.increment("unknown_msgtype", txid)
                 handle_unknown_detect_transfers(exporter, txinfo, elem)
 

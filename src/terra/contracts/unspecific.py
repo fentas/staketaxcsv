@@ -23,7 +23,7 @@ from common.ExporterTypes import TX_TYPE_UNKNOWN
 
 
 def handle(exporter, elem, txinfo, contract):
-    print(f"UNSPECIFIC! {contract}")
+    #print(f"UNSPECIFIC! {contract}")
     #print(elem)
 
     return TX_TYPE_UNKNOWN

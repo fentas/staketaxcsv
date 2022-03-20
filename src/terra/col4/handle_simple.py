@@ -20,8 +20,8 @@ def handle_unknown_detect_transfers(exporter, txinfo, elem):
     if len(transfers_in) == 0 and len(transfers_out) == 0:
         handle_unknown(exporter, txinfo)
     elif len(transfers_in) == 1 and len(transfers_out) == 1:
-        sent_amount, sent_currency, _, _ = transfers_out[0]
-        received_amount, received_currency, _, _ = transfers_in[0]
+        sent_amount, sent_currency = transfers_out[0]
+        received_amount, received_currency = transfers_in[0]
 
         row = make_unknown_tx_with_transfer(
             txinfo, sent_amount, sent_currency, received_amount, received_currency)

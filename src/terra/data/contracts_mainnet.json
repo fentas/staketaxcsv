@@ -35,5 +35,22 @@
             "Astroport",
             "Vault"
         ]
+    },
+    "terra1xe5n8aa8xvtqtwtaj6k9fu0kd209thyff3gfuk": {
+        "protocol": "Styllar",
+        "name": "Stylar Whitelist",
+        "id": "STYLLAR_WHITELIST",
+        "tags": [
+            "Styllar"
+        ]
+    },
+    "terra14hg497r875c62f4kxs8q7pkek0kdw0dphppa0h": {
+        "id": "PYLON_SAYVE_18-MONTH_POOL",
+        "name": "SAYVE 18-month Pool",
+        "protocol": "Pylon",
+        "icon": "https://finder.extraterrestrial.money/images/PYL100.png",
+        "tags": [
+            "Pylon"
+        ]
     }
 }
