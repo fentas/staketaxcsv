@@ -1,5 +1,5 @@
 from terra import util_terra
-from common.make_tx import make_spend_tx
+from common.make_tx import make_just_fee_tx
 from terra.col5.contracts.config import CONTRACTS
 import terra.col5.contracts.astroport
 import terra.col5.contracts.wormhole
@@ -16,11 +16,11 @@ def can_handle(exporter, elem, txinfo):
     return contract in CONTRACTS
 
 
-def handle(exporter, elem, txinfo):
+def handle(exporter, elem, txinfo, index=0):
     rows = []
 
     # Lookup handler function from terra.col5.contracts.*
-    contract = util_terra._contract(elem, 0)
+    contract = util_terra._contract(elem, index)
     handler_func = CONTRACTS[contract]
 
     result_rows = handler_func(elem, txinfo)
@@ -29,14 +29,14 @@ def handle(exporter, elem, txinfo):
     _ingest_rows(exporter, txinfo, rows)
 
 
-def _ingest_rows(exporter, txinfo, rows):
+def _ingest_rows(exporter, txinfo, rows=[]):
     # Add row(s) to CSV
     if len(rows) == 0:
         # No transactions.  Just make a "spend fee" row.
         if txinfo.fee:
-            row = make_spend_tx(txinfo, txinfo.fee, txinfo.fee_currency)
+            row = make_just_fee_tx(txinfo, txinfo.fee, txinfo.fee_currency)
             row.comment = "tx fee"
-            rows.append(rows)
+            exporter.ingest_row(row)
     else:
         for i, row in enumerate(rows):
             # Apply transaction fee to first row's fee column only

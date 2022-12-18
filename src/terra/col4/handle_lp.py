@@ -10,8 +10,8 @@ from terra.make_tx import (
 )
 
 
-def handle_lp_deposit(exporter, elem, txinfo):
-    from_contracts = util_terra._events_with_action(elem, "from_contract", "provide_liquidity")
+def handle_lp_deposit(exporter, elem, txinfo, index=None):
+    from_contracts = util_terra._events_with_action(elem, "from_contract", "provide_liquidity", index)
 
     for from_contract in from_contracts:
         rows = _handle_lp_deposit(txinfo, from_contract)
@@ -42,15 +42,21 @@ def _handle_lp_deposit(txinfo, from_contract):
     return rows
 
 
-def handle_lp_withdraw(exporter, elem, txinfo):
-    from_contracts = util_terra._events_with_action(elem, "from_contract", "withdraw_liquidity")
+def handle_lp_withdraw(exporter, elem, txinfo, index=None):
+    if index is None:
+        from_contracts = util_terra._events_with_action(elem, "from_contract", "withdraw_liquidity")
 
-    for i, from_contract in enumerate(from_contracts):
-        rows = _handle_lp_withdraw(elem, txinfo, from_contract, i)
+        for i, from_contract in enumerate(from_contracts):
+            rows = _handle_lp_withdraw(elem, txinfo, from_contract, i)
+            util_terra._ingest_rows(exporter, rows)
+    else:
+        from_contract = util_terra._event_with_action(elem, "from_contract", "withdraw_liquidity", index)
+        rows = _handle_lp_withdraw(elem, txinfo, from_contract, index)
         util_terra._ingest_rows(exporter, rows)
 
 
-def _handle_lp_withdraw(elem, txinfo, from_contract, i=0):
+
+def _handle_lp_withdraw(elem, txinfo, from_contract, index=0):
     txid = txinfo.txid
 
     # Determine LP currenecy
@@ -62,7 +68,7 @@ def _handle_lp_withdraw(elem, txinfo, from_contract, i=0):
     lp_amount = util_terra._float_amount(lp_amount_string, lp_currency)
 
     # Create _LP_WITHDRAW rows
-    rows = _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, elem, from_contract, i)
+    rows = _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, elem, from_contract, index)
     return rows
 
 
@@ -86,7 +92,7 @@ def handle_lp_deposit_idx(exporter, elem, txinfo):
     exporter.ingest_row(row)
 
 
-def _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, data, from_contract, i=0):
+def _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, data, from_contract, index=0):
     rows = []
     txid = txinfo.txid
     wallet_address = txinfo.wallet_address
@@ -94,9 +100,9 @@ def _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, data, from_cont
     # Determine received collateral
     withdraws = _extract_collateral_amounts(txid, from_contract, "refund_assets")
     currency1, amount1 = withdraws[0]
-    amount1, currency1 = _check_ust_adjustment(amount1, currency1, data, wallet_address, txid, i)
+    amount1, currency1 = _check_ust_adjustment(amount1, currency1, data, wallet_address, txid, index)
     currency2, amount2 = withdraws[1]
-    amount2, currency2 = _check_ust_adjustment(amount2, currency2, data, wallet_address, txid, i)
+    amount2, currency2 = _check_ust_adjustment(amount2, currency2, data, wallet_address, txid, index)
 
     rows.append(make_lp_withdraw_tx(
         txinfo, lp_amount / 2, lp_currency, amount1, currency1, txid, empty_fee=False))
@@ -183,23 +189,20 @@ def handle_lp_stake_deposit_strategy(exporter, elem, txinfo, index=0):
 
 def handle_lp_unstake(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
 
-    # Determine LP currency
-    lp_currency_address = elem["logs"][index]["events_by_type"]["execute_contract"]["contract_address"][0]
-    lp_currency = util_terra._lookup_lp_address(lp_currency_address, txid)
-    if not lp_currency:
-        raise Exception("Bad condition handle_lp_stake() txid=%s", txid)
-
-    # Determine LP amount
-    execute_msg = util_terra._execute_msg(elem)
-    lp_amount = util_terra._float_amount(execute_msg["unbond"]["amount"], lp_currency)
+    transfers_in, _ = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1)
+    lp_amount, lp_currency = transfers_in[0]
+    lp_currency = util_terra._lookup_address(lp_currency, txid)
+    lp_amount = util_terra._float_amount(lp_amount, lp_currency)
 
     # Create _LP_UNSTAKE row
     row = make_lp_unstake_tx(txinfo, lp_amount, lp_currency)
     exporter.ingest_row(row)
 
     # Create _LP_WITHDRAW rows (if withdraw exists)
-    from_contract = util_terra._event_with_action(elem, "from_contract", "withdraw_liquidity")
+    from_contract = util_terra._event_with_action(elem, "from_contract", "withdraw_liquidity", index)
     if from_contract:
         rows = _handle_withdraw_collaterals(txinfo, lp_amount, lp_currency, elem, from_contract)
         util_terra._ingest_rows(exporter, rows)

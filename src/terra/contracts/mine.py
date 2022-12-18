@@ -7,3 +7,4 @@ CONTRACTS = [
 def handle(exporter, elem, txinfo, contract):
     print(f"Mine! {contract}")
     #print(elem)
+    return True

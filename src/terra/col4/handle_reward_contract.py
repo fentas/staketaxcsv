@@ -18,8 +18,18 @@ CONTRACTS_WITHDRAW_REWARD = {
 }
 
 
-def handle_airdrop(exporter, elem, txinfo):
+def handle_airdrop(exporter, elem, txinfo, index=None):
     msgs = elem["tx"]["value"]["msg"]
+    if index is not None:
+        msg_type = msgs[index]["type"]
+
+        if msg_type == "wasm/MsgExecuteContract":
+            _handle_airdrop(exporter, elem, txinfo, index)
+        elif msg_type == "distribution/MsgWithdrawDelegationReward":
+            _handle_withdraw_rewards(exporter, elem, txinfo, index)
+
+        return
+
     for index, msg in enumerate(msgs):
         msg_type = msg["type"]
 
@@ -124,19 +134,22 @@ def _lookup_airdrop_currency(txid, data, index):
     return None
 
 
-def handle_reward_contract(exporter, elem, txinfo):
+def handle_reward_contract(exporter, elem, txinfo, index=None):
     txid = txinfo.txid
     wallet_address = txinfo.wallet_address
 
     # Check transfer event for reward
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid)
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
     if transfers_in:
-        amount, currency = transfers_in[0]
+        amount, currency = util_terra._convert(*transfers_in[0])
         row = make_reward_tx(txinfo, amount, currency)
         exporter.ingest_row(row)
         return
 
     logs = elem["logs"]
+    if index is not None:
+        logs = [logs[index]]
+
     for i, log in enumerate(logs):
         from_contract = log["events_by_type"]["from_contract"]
         if i == 0:

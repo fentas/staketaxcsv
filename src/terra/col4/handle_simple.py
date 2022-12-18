@@ -12,10 +12,12 @@ def handle_simple(exporter, txinfo, tx_type, z_index=0):
     exporter.ingest_row(row)
 
 
-def handle_unknown_detect_transfers(exporter, txinfo, elem):
+def handle_unknown_detect_transfers(exporter, txinfo, elem, index):
     wallet_address = txinfo.wallet_address
     txid = txinfo.txid
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid)
+    # memo = elem["tx"]["value"]["memo"]
+
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
 
     if len(transfers_in) == 0 and len(transfers_out) == 0:
         handle_unknown(exporter, txinfo)

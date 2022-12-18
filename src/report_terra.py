@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import pprint
+import time
 
 import terra.processor
 from common import report_util
@@ -29,12 +30,26 @@ from terra.api_search_figment import LIMIT_FIGMENT, SearchAPIFigment
 from terra.config_terra import localconfig
 from terra.progress_terra import SECONDS_PER_TX, ProgressTerra
 
+import terra.contracts.anchor.borrow as b
+
+# os.environ['TZ'] = 'Europe/Berlin'
+# time.tzset()
 
 def main():
     wallet_address, export_format, txid, options = report_util.parse_args(TICKER_LUNA)
 
     if txid:
         _read_options(options)
+
+        if localconfig.cache:
+            cache = Cache()
+            _cache_load(cache)
+
+            if CacheChain("terra", wallet_address) is None:
+                logging.info("Could not initialize mongodb cache ...")
+            else:
+                logging.info("Chache txs and contracts to mongodb ...")
+
         exporter = txone(wallet_address, txid)
         exporter.export_print()
         if export_format != FORMAT_DEFAULT:
@@ -42,6 +57,9 @@ def main():
     else:
         exporter = txhistory(wallet_address, options)
         report_util.run_exports(TICKER_LUNA, wallet_address, exporter, export_format)
+
+    # just debug
+    print(f"$$$ END TOTAL: {b.BORROW + b.CUMULATIVE_INTREST}")
 
 
 def _read_options(options):
@@ -64,12 +82,12 @@ def wallet_exists(wallet_address):
 def txone(wallet_address, txid):
     data = FcdAPI.get_tx(txid)
     print("\ndebug data:")
-    pprint.pprint(data)
+    #pprint.pprint(data)
     print("")
 
     exporter = Exporter(wallet_address, localconfig, TICKER_LUNA)
     txinfo = terra.processor.process_tx(wallet_address, data, exporter)
-    txinfo.print()
+    #txinfo.print()
     print("")
 
     return exporter
@@ -166,10 +184,11 @@ def _get_txs(wallet_address, progress):
                 return out
 
     cache = CacheChain()
+    # offset = 234338982
     offset = 0
     out = []
     for _ in range(_max_queries()):
-        break
+        # break
         num_tx = len(out)
         progress.report(num_tx, f"Retrieving transaction {num_tx + 1} ...")
 
@@ -179,7 +198,7 @@ def _get_txs(wallet_address, progress):
         if cache is not None:
             all_unique = cache.insert_txs(result)
             if all_unique == False:
-                break
+               break
         else:
             out.extend(result)
             

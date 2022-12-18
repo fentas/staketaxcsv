@@ -4,12 +4,17 @@ from terra.util_terra import _asset_to_currency, _float_amount
 from terra.col4.handle_simple import handle_unknown_detect_transfers
 
 
-def handle_swap_msgswap(exporter, elem, txinfo):
+def handle_swap_msgswap(exporter, elem, txinfo, index):
     txid = txinfo.txid
     wallet_address = txinfo.wallet_address
 
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid)
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
 
+    print(index)
+    print(len(transfers_in))
+    print(transfers_in)
+    print(len(transfers_out))
+    print(transfers_out)
     for i in range(len(transfers_in)):
         received_amount, received_currency = transfers_in[i]
         sent_amount, sent_currency = transfers_out[i]
@@ -19,14 +24,14 @@ def handle_swap_msgswap(exporter, elem, txinfo):
         exporter.ingest_row(row)
 
 
-def handle_swap(exporter, elem, txinfo):
+def handle_swap(exporter, elem, txinfo, index=None):
     logs = elem["logs"]
 
-    if "coin_received" in logs[0]["events_by_type"]:
-        _handle_swap(exporter, elem, txinfo)
+    if "coin_received" in logs[index if index != None else 0]["events_by_type"]:
+        _handle_swap(exporter, elem, txinfo, index)
     else:
         # older version of data
-        from_contract = util_terra._event_with_action(elem, "from_contract", "swap")
+        from_contract = util_terra._event_with_action(elem, "from_contract", "swap", index)
         _parse_from_contract_for_swap(exporter, txinfo, from_contract)
 
 
@@ -40,11 +45,14 @@ def handle_execute_swap_operations(exporter, elem, txinfo):
         _parse_swap_operations(exporter, elem, txinfo)
 
 
-def _handle_swap(exporter, elem, txinfo):
+def _handle_swap(exporter, elem, txinfo, index=None):
     txid = txinfo.txid
     logs = elem["logs"]
 
     # Handle message with 'execute_order' action (execution of preceding limit order message) if exists
+    if index != None:
+        logs = [logs[index]]
+
     for log in logs:
         if _has_execute_order_action(log):
             return _parse_execute_order(exporter, txinfo, log)

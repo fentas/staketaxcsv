@@ -1,23 +1,83 @@
-# known contracts from protocol
-CONTRACTS = [
-    # Nexus Governance
-    "terra1xrk6v2tfjrhjz2dsfecj40ps7ayanjx970gy0j",
-    # Nexus Psi-UST Terraswap Staking
-    "terra12kzewegufqprmzl20nhsuwjjq6xu8t8ppzt30a",
-    # Nexus bLuna Vault
-    "terra1cda4adzngjzcn8quvfu2229s8tedl5t306352x",
-    # Nexus nLuna rewards
-    "terra1hjv3quqsrw3jy7pulgutj0tgxrcrnw2zs2j0k7",
-    # Nexus nLuna
-    "terra10f2mt82kjnkxqj2gepgwl637u2w4ue2z5nhz5j",
-    # Nexus nETH
-    "terra178v546c407pdnx5rer3hu8s2c0fc924k74ymnn",
-    # Nexus nLuna-Psi Terraswap Staking
-    "terra1hs4ev0ghwn4wr888jwm56eztfpau6rjcd8mczc",
-    # Nexus nETH-Psi Terraswap Staking
-    "terra1lws09x0slx892ux526d6atwwgdxnjg58uan8ph",
-]
+from terra import util_terra
+from common.make_tx import (
+    make_reward_tx,
+)
+from terra.make_tx import (
+    make_swap_tx_terra,
+    make_stake_tx,
+)
+from terra.col4.handle_governance import (
+    handle_governance_unstake, 
+    handle_governance_stake,
+)
+from terra.col4.handle_simple import (
+    handle_simple,
+)
+from common.ExporterTypes import (
+    TX_TYPE_VOTE,
+)
 
-def handle(exporter, elem, txinfo, contract):
-    print(f"Nexus! {contract}")
-    #print(elem)
+def handle(exporter, elem, txinfo, index):
+    execute_msg = util_terra._execute_msg(elem, index)
+
+    if "claim" in execute_msg:
+       return handle_claim(exporter, elem, txinfo, index)
+
+    if "withdraw" in execute_msg:
+        return handle_claim(exporter, elem, txinfo, index)
+
+    if "anyone" in execute_msg and "anyone_msg" in execute_msg["anyone"]:
+        msg = execute_msg["anyone"]["anyone_msg"]
+
+        if "withdraw_voting_tokens" in msg:
+            return handle_governance_unstake(exporter, elem, txinfo, index)
+
+        if "claim_rewards" in msg:
+            return handle_claim(exporter, elem, txinfo, index)
+
+        if "cast_vote" in msg:
+            return handle_simple(exporter, txinfo, TX_TYPE_VOTE)
+
+    if "send" in execute_msg:
+        send = execute_msg["send"]
+        msg = send["msg"]
+
+        if "deposit" in msg:
+            return handle_vault_swap(exporter, elem, txinfo, index)
+
+        if "withdraw" in msg:
+            return handle_vault_swap(exporter, elem, txinfo, index)
+
+    print("Nexus!")
+    return True
+
+def handle_vault_swap(exporter, elem, txinfo, index):
+    txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
+
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
+
+    assert(len(transfers_out) == 1)
+    sent_amount, sent_currency = util_terra._convert(*transfers_out[0])
+
+    if len(transfers_in) == 0:
+        row = make_stake_tx(txinfo, sent_amount, sent_currency, txid)
+        exporter.ingest_row(row)
+        return
+
+    received_amount, received_currency = util_terra._convert(*transfers_in[0])
+
+    row = make_swap_tx_terra(txinfo, sent_amount, sent_currency, received_amount, received_currency, txid)
+    exporter.ingest_row(row)
+
+def handle_claim(exporter, elem, txinfo, index):
+    txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
+
+    transfers_in, _ = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1)
+
+    amount, currency = util_terra._convert(*transfers_in[0])
+
+    row = make_reward_tx(txinfo, amount, currency, txid)
+    exporter.ingest_row(row)

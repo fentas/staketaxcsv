@@ -1,31 +1,78 @@
-# known contracts from protocol
-CONTRACTS = [
-    # LOOP Token - LOOP
-    "terra1nef5jf6c7js9x6gkntlehgywvjlpytm7pcgkn4",
-    # Loop Staking
-    "terra1cr7ytvgcrrkymkshl25klgeqxfs48dq4rv8j26",
-    # Loop IDO (Via StarTerra)
-    "terra1wcmquav80s07phd3wc4zkshuv40wmcpurqw5t2",
-    # loopswap liquidity token - uLP / loop-loopr
-    "terra1p266mp7ahnrnuxnxqxfhf4rejcqe2lmjsy6tuq",
-    "terra1eas9qze4j0lhasc6g0hjykvcyksakvsun4ndyv",
-    "terra1j6l2m2e2q92zkd9v48cs2l4n74rxn2plphul96",
-    "terra1nuuq9qmyqv5td9297fktnf864pvlw9q79f65m8",
-    "terra1yy46j5xy7fykt6q58aa4u4y39h4fxc7jke2spd",
-    # ... / loop-ust
-    "terra1f0nj4lnggvc7r8l3ay5jx7q2dya4gzllez0jw2",
-    # LoopFarm - uLP
-    "terra1hd7n4mvg7pkgk7y8fzry3uh5m9l3az45dlnps2",
-    "terra10s8g4nph6xy77wj26yxdudtxqzec4dk2mhlmua",
-    "terra1r6feguefa559986p6pv63du088st83vevvsxff",
-    "terra1l9722elh7wucvexw7nclawlnr04t8ktz0muv5e",
-    "terra1kvhaxxn6dl82kqppvfug4ggmxyqvcpk6vjz762",
-    "terra1nkqjwr3lsya7vhamq53g5hmxnfkdz3ayzqp8y9",
-    "terra1a8l9532278f0dn9lg343tqcvumkec26d5ss6mj",
-    # LP
-    "terra1nx03wv4mqglwkfual4wcyq0lrwa425gr4gz0rj",
-]
+from terra import util_terra
+from terra.col4 import (
+    handle_governance,
+)
+from common.make_tx import (
+    make_just_fee_txinfo,
+    make_reward_tx,
+)
+from terra.col4.handle_lp import handle_lp_stake, handle_lp_unstake
+from terra.make_tx import (
+    make_lp_stake_tx,
+    make_lp_unstake_tx,
+    make_swap_tx_terra,
+)
 
-def handle(exporter, elem, txinfo, contract):
-    print(f"Loop! {contract}")
-    #print(elem)
+def handle(exporter, elem, txinfo, index):
+    execute_msg = util_terra._execute_msg(elem, index)
+
+    # Nothing to do here - internal
+    # if "stake" in execute_msg:
+    #     # return handle_stake(exporter, elem, txinfo, index)
+    #     return handle_governance.handle_governance_stake(exporter, elem, txinfo, index)
+
+    if "join_ido" in execute_msg:
+        return handle_fee(exporter, txinfo, "join IDO")
+
+    if "send" in execute_msg:
+        send = execute_msg["send"]
+        msg = send["msg"]
+
+        # Staking
+        if "stake" in msg:
+            return handle_governance.handle_governance_stake(exporter, elem, txinfo, index)
+
+        if "unstake_and_claim" in msg:
+            return handle_unstake_and_claim(exporter, elem, txinfo, index)
+
+        if "swap" in msg:
+            return handle_swap(exporter, elem, txinfo, index)
+
+    print(f"Loop!")
+    return True
+
+def handle_swap(exporter, elem, txinfo, index):
+    wallet_address = txinfo.wallet_address
+    txid = txinfo.txid
+
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1 and len(transfers_out) == 1)
+
+    sent_amount, sent_currency = util_terra._convert(*transfers_out[0])
+    received_amount, received_currency = util_terra._convert(*transfers_in[0])
+
+    row = make_swap_tx_terra(txinfo, sent_amount, sent_currency, received_amount, received_currency)
+    exporter.ingest_row(row)
+
+def handle_unstake_and_claim(exporter, elem, txinfo, index):
+    wallet_address = txinfo.wallet_address
+    txid = txinfo.txid
+
+    transfers_in, _ = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) >= 2)
+
+    for t in transfers_in:
+        amount, currency = util_terra._convert(*t)
+
+        if currency.startswith("LP_"):
+            row = make_lp_unstake_tx(txinfo, amount, currency)
+            exporter.ingest_row(row)
+        else:
+            row = make_reward_tx(txinfo, amount, currency, txid)
+            exporter.ingest_row(row)
+
+
+def handle_fee(exporter, txinfo, comment):
+    row = make_just_fee_txinfo(txinfo)
+    row.comment += f" *{comment}"
+    exporter.ingest_row(row)

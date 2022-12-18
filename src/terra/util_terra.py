@@ -9,6 +9,10 @@ from terra.api_lcd import LcdAPI
 from terra.config_terra import localconfig
 import common.ibc.api_lcd
 
+from terra.constants import (
+    SPECIAL_CURRENCY
+)
+
 
 def _contracts(elem):
     out = []
@@ -60,6 +64,14 @@ def _execute_msg(elem, index=0):
 
 def _execute_msg_field(elem, index=0):
     msg_base64 = elem["tx"]["value"]["msg"][index]["value"]["execute_msg"]
+
+    if type(msg_base64) is str:
+        try:
+            msg = json.loads(msg_base64)
+            return msg
+        except Exception:
+            pass
+
     if type(msg_base64) is dict:
         for k, v in msg_base64.items():
             if "msg" in v:
@@ -70,7 +82,12 @@ def _execute_msg_field(elem, index=0):
                     pass
         return msg_base64
 
-    msg = json.loads(base64.b64decode(msg_base64))
+    msg = msg_base64
+    try:
+        msg = base64.b64decode(msg_base64)
+    except Exception:
+        pass
+    msg = json.loads(msg)
 
     for k, v in msg.items():
         if "msg" in v:
@@ -111,7 +128,7 @@ def _multi_transfers(elem, wallet_address, txid):
     return transfers_in, transfers_out
 
 
-def _transfers(elem, wallet_address, txid, multicurrency=False):
+def _transfers(elem, wallet_address, txid, multicurrency=False, index=None):
     transfers_in = []
     transfers_out = []
     is_columbus_3 = (elem.get("chainId", None) == "columbus-3")
@@ -119,16 +136,18 @@ def _transfers(elem, wallet_address, txid, multicurrency=False):
         return _transfers_columbus_3(elem, wallet_address, txid, multicurrency)
     logs = elem["logs"]
 
+    if index is not None:
+        logs = [logs[index]]
+    
     for log in logs:
         cur_transfers_in, cur_transfers_out = _transfers_log(log, wallet_address, multicurrency)
-
         transfers_in.extend(cur_transfers_in)
         transfers_out.extend(cur_transfers_out)
 
     return transfers_in, transfers_out
 
 
-def _transfers_log(log, wallet_address, multicurrency=False):
+def _transfers_log(log, wallet_address, multicurrency=False, from_contract=False):
     transfers_in = []
     transfers_out = []
     events = log.get("events", [])
@@ -160,6 +179,11 @@ def _transfers_log(log, wallet_address, multicurrency=False):
                     sender = attributes[i + 1]["value"]
                     amount_string = attributes[i + 2]["value"]
 
+                    # sometimes with multiswaps
+                    # there are swaps for none
+                    if amount_string == "":
+                        amount_string = "0uluna"
+
                 if recipient == wallet_address:
                     if multicurrency:
                         for amount, currency in _amounts(amount_string):
@@ -173,6 +197,52 @@ def _transfers_log(log, wallet_address, multicurrency=False):
                             transfers_out.append([amount, currency])
                     else:
                         amount, currency = _amount(amount_string)
+                        transfers_out.append([amount, currency])
+    
+    #if len(transfers_in) == 0 and len(transfers_out) == 0 or from_contract:
+    for event in events:
+        if event["type"] == "from_contract":
+            attributes = event["attributes"]
+
+            for i in range(0, len(attributes), 1):
+                attribute = attributes[i]
+
+                if attribute["key"] == "action" and attribute["value"] in ["transfer", "send", "burn_from"]:
+                    currency = attributes[i-1]["value"]
+                    sender = attributes[i+1]["value"]
+                    recipient = attributes[i+2]["value"]
+                    amount = attributes[i+3]["value"]
+
+                    if recipient == wallet_address:
+                        transfers_in.append([amount, currency])
+                    elif sender == wallet_address:
+                        transfers_out.append([amount, currency])
+
+                if attribute["key"] == "action" and attribute["value"] in ["mint"]:
+                    currency = attributes[i-1]["value"]
+                    to = attributes[i+1]["value"]
+                    amount = attributes[i+2]["value"]
+
+                    if to == wallet_address:
+                        transfers_in.append([amount, currency])
+
+                if attribute["key"] == "action" and attribute["value"] in ["burn"]:
+                    currency = attributes[i-1]["value"]
+                    fro = attributes[i+1]["value"]
+                    amount = attributes[i+2]["value"]
+
+                    if fro == wallet_address:
+                        transfers_out.append([amount, currency])
+
+                if attribute["key"] == "action" and attribute["value"] in ["transfer_from"]:
+                    currency = attributes[i-1]["value"]
+                    sender = attributes[i+1]["value"]
+                    recipient = attributes[i+2]["value"]
+                    amount = attributes[i+4]["value"]
+
+                    if recipient == wallet_address:
+                        transfers_in.append([amount, currency])
+                    elif sender == wallet_address:
                         transfers_out.append([amount, currency])
 
     return transfers_in, transfers_out
@@ -247,12 +317,18 @@ def _extract_amounts(amount_string):
 
 def _asset_to_currency(asset, txid):
     # Example: 'terra1mqsjugsugfprn3cvgxsrr8akkvdxv2pzc74us7' -> USD
+    if asset.startswith("native:"):
+        asset = asset[7:]
+    elif asset.startswith("cw20:"):
+        asset = asset[5:]
+
     if asset.startswith("terra"):
         currency = _lookup_address(asset, txid)
         return currency
 
     if asset.startswith("u"):
         return _denom_to_currency(asset)
+
 
     raise Exception("_asset_to_currency(): Unable to determine currency for asset={} txid={}".format(
         asset, txid))
@@ -321,9 +397,11 @@ def _lookup_address(addr, txid):
     #if addr in localconfig.currency_addresses:
     #    return localconfig.currency_addresses[addr]
 
-    print(addr)
     init_msg = _query_wasm(addr)
     #logging.info("init_msg: %s", init_msg)
+
+    if addr in SPECIAL_CURRENCY:
+        return SPECIAL_CURRENCY[addr]
 
     if "symbol" in init_msg:
         currency = init_msg["symbol"]
@@ -370,7 +448,7 @@ def _lookup_lp_address(addr, txid):
         currency1 = "UST"
         currency2 = "MIR"
     else:
-        raise Exception("Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
+        raise Exception("(1) Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
 
     if currency1 == "UST":
         lp_currency = "LP_{}_UST".format(currency2)
@@ -380,7 +458,7 @@ def _lookup_lp_address(addr, txid):
         lp_currency = "LP_{}_{}".format(currency1, currency2)
     else:
         localconfig.currency_addresses[addr] = ""
-        raise Exception("Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
+        raise Exception("(2) Unable to determine lp currency for addr={}, txid={}".format(addr, txid))
 
     localconfig.lp_currency_addresses[addr] = lp_currency
     return lp_currency
@@ -404,6 +482,14 @@ def _query_lp_address(addr, txid):
             elif "native_token" in asset_info:
                 currency = _denom_to_currency(asset_info["native_token"]["denom"])
                 out[i] = currency
+            elif "cw20" in asset_info:
+                contract_addr = asset_info["cw20"]
+                init_msg2 = _query_wasm(contract_addr)
+                currency = init_msg2["symbol"]
+                out[i] = currency
+            elif "native" in asset_info:
+                currency = _denom_to_currency(asset_info["native"])
+                out[i] = currency
             else:
                 raise Exception("Unexpected data for asset_infos", addr, txid, init_msg)
 
@@ -417,8 +503,9 @@ def _query_lp_address(addr, txid):
 
 
 def _query_wasm(addr):
+    # if addr == "terra17y9qkl8dfkeg4py7n0g5407emqnemc3yqk5rup":
+        # quit()
     data = LcdAPI.contract_info(addr)
-    print(data)
 
     init_msg = _init_msg(data)
     return init_msg
@@ -433,8 +520,12 @@ def _init_msg(data):
     return init_msg
 
 
-def _event_with_action(elem, event_type, action):
+def _event_with_action(elem, event_type, action, index=None):
     logs = elem["logs"]
+    
+    if index is not None:
+        logs = [logs[index]]
+
     for log in logs:
         event = log["events_by_type"].get(event_type, None)
         if event:
@@ -443,9 +534,13 @@ def _event_with_action(elem, event_type, action):
     return None
 
 
-def _events_with_action(elem, event_type, action):
+def _events_with_action(elem, event_type, action, index=None):
     events = []
     logs = elem["logs"]
+
+    if index != None:
+        logs = [logs[index]]
+
     for log in logs:
         event = log["events_by_type"].get(event_type, None)
         if event:
@@ -473,3 +568,10 @@ def _add_anchor_fees(elem, txid, row):
         row.fee += fee_amount
 
     return row
+
+def _convert(amount, currency):
+    if currency.startswith("terra"):
+        currency = _lookup_address(currency, "")
+        amount = _float_amount(amount, currency)
+
+    return amount, currency

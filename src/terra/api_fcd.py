@@ -2,10 +2,11 @@ import logging
 import time
 
 import requests
+from common.CacheChain import CacheChain
 
 FCD_URL = "https://fcd.terra.dev"
 # todo make this configurable
-LIMIT_FCD = 10
+LIMIT_FCD = 100
 
 
 class FcdAPI:
@@ -13,6 +14,12 @@ class FcdAPI:
 
     @classmethod
     def get_tx(cls, txhash):
+        cache = CacheChain()
+        if cache is not None:
+            data = cache.get_tx(txhash)
+            if data is not None:
+                return data
+
         url = "{}/v1/tx/{}".format(FCD_URL, txhash)
         data = cls._query(url)
 

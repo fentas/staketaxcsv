@@ -79,6 +79,8 @@ def _execute_type(elem, txinfo, index=0):
     txid = txinfo.txid
     execute_msg = util_terra._execute_msg(elem, index)
     contract = util_terra._contract(elem, index)
+
+    addr = None
     try:
         addr = util_terra._lookup_address(contract, txid)
     except Exception:
@@ -151,7 +153,7 @@ def _execute_type(elem, txinfo, index=0):
         return EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS
     elif "transfer" in execute_msg:
         return EXECUTE_TYPE_TRANSFER
-    elif "provide_liquidity" in execute_msg or "bond" in execute_msg and len(addr):
+    elif "provide_liquidity" in execute_msg or "bond" in execute_msg and addr and len(addr):
         return EXECUTE_TYPE_PROVIDE_LIQUIDITY
     elif "increase_allowance" in execute_msg:
         return _execute_type(elem, txinfo, index + 1)

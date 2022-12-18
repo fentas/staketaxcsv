@@ -101,11 +101,16 @@ class CacheChain:
             name="unique", 
             unique=True
         )
+        self.db.price.create_index(
+            [('contract', ASCENDING), ('timestamp', ASCENDING)], 
+            name="unique", 
+            unique=True
+        )
 
 
     def get_tx(self, tx):
         find = {}
-        find[self._tx_key] = tx
+        find[self._chain['keys']['txhash']] = tx
         return self.db.txs.find_one(find)
 
     def get_account_txs(self):
@@ -113,7 +118,9 @@ class CacheChain:
             {
                 "$match": {
                     "account": self.account,
-                    "timestamp": { "$gte" : "2021-06-01T2:00:00Z" },
+                    # , "$lte": "2021-12-31T2:00:00Z"
+                    #  "2021-06-01T2:00:00Z"
+                    "timestamp": { "$gte": "2021-12-31T2:00:00Z" }, 
                 }
             },
             { "$sort": { "timestamp": self._chain['sort'] } },
@@ -149,9 +156,11 @@ class CacheChain:
                     "txhash": tx[self._chain['keys']['txhash']],
                     "timestamp": tx[self._chain['keys']['timestamp']]
                 })
+                # logging.info("insert account tx: %s", tx[self._chain['keys']['txhash']])
             except errors.DuplicateKeyError:
                 logging.info("duplicate account tx: %s", tx[self._chain['keys']['txhash']])
                 return False
+                # pass
 
         return True
 
@@ -164,6 +173,23 @@ class CacheChain:
     def get_contract(self, contract):
         result = self.db.contract.find_one({
             "contract": contract
+        })
+        return result['data'] if result is not None else None
+
+    def set_price(self, contract, timestamp, data):
+        try:
+            self.db.price.insert_one({
+                "contract": contract,
+                "timestamp": timestamp,
+                "data": data
+            })
+        except errors.DuplicateKeyError:
+            logging.info("duplicate contract %s @ %s", contract, timestamp)
+
+    def get_price(self, contract, timestamp):
+        result = self.db.price.find_one({
+            "contract": contract,
+            "timestamp": timestamp
         })
         return result['data'] if result is not None else None
 

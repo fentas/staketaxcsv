@@ -1,6 +1,6 @@
 import logging
 
-from common.make_tx import make_reward_tx, make_spend_tx
+from common.make_tx import make_reward_tx, make_spend_tx, _TX_FEE
 from terra import util_terra
 from terra.config_terra import localconfig
 from terra.constants import CUR_KRT, CUR_LUNA, CUR_UST
@@ -12,11 +12,11 @@ REWARD_CURRENCIES = set([
 ])
 
 
-def handle_reward(exporter, elem, txinfo, msgtype):
+def handle_reward(exporter, elem, txinfo, msgtype, index):
     """ Returns reward amount of (luna, ust, krt) for this transaction """
     txid = txinfo.txid
     wallet_address = txinfo.wallet_address
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, multicurrency=True)
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, multicurrency=True, index=index)
 
     # Sum rewards by currency (may have multiple multiple messages within same transaction)
     rewards = {}
@@ -40,17 +40,19 @@ def handle_reward(exporter, elem, txinfo, msgtype):
         i += 1
 
     # Create row for spend fee
-    row = make_spend_tx(txinfo, txinfo.fee, txinfo.fee_currency)
-    row.fee, row.fee_currency = "", ""
-    row.z_index = -1
-    if msgtype == "staking/MsgDelegate":
-        row.comment = "fee for delegate"
-    elif msgtype == "distribution/MsgWithdrawDelegationReward":
-        row.comment = "fee for withdraw_delegate_reward"
-    elif msgtype == "staking/MsgBeginRedelegate":
-        row.comment = "fee for redelegate"
-    elif msgtype == "staking/MsgUndelegate":
-        row.comment = "fee for undelegate"
-    else:
-        logging.error("handle_reward(): unhandled msgtype=%s", msgtype)
-    exporter.ingest_row(row)
+    if txid not in _TX_FEE:
+        _TX_FEE[txid] = txinfo
+        row = make_spend_tx(txinfo, txinfo.fee, txinfo.fee_currency)
+        row.fee, row.fee_currency = "", ""
+        row.z_index = -1
+        if msgtype == "staking/MsgDelegate":
+            row.comment = "fee for delegate"
+        elif msgtype == "distribution/MsgWithdrawDelegationReward":
+            row.comment = "fee for withdraw_delegate_reward"
+        elif msgtype == "staking/MsgBeginRedelegate":
+            row.comment = "fee for redelegate"
+        elif msgtype == "staking/MsgUndelegate":
+            row.comment = "fee for undelegate"
+        else:
+            logging.error("handle_reward(): unhandled msgtype=%s", msgtype)
+        exporter.ingest_row(row)

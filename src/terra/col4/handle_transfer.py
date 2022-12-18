@@ -1,5 +1,5 @@
 from common.ErrorCounter import ErrorCounter
-from common.make_tx import make_transfer_in_tx, make_transfer_out_tx, make_unknown_tx_with_transfer
+from common.make_tx import make_transfer_in_tx, make_transfer_out_tx, make_unknown_tx_with_transfer, make_just_fee_tx
 from terra import util_terra
 from terra.col4.handle_simple import handle_unknown, handle_unknown_detect_transfers
 
@@ -31,12 +31,14 @@ def handle_transfer(exporter, elem, txinfo, index):
         amount = util_terra._float_amount(amount_string, None)
 
         if wallet_address == from_address:
-            # Check if address is an 
+            # Check if address is an contract address
+            # todo: all fee? like coinhall for sure
             info = contract_info(to_address)
             if info is not None:
                 row = make_just_fee_tx(txinfo, amount, currency, TX_TYPE_FEE)
             else:
                 row = make_transfer_out_tx(txinfo, amount, currency, to_address)
+            #row = make_transfer_out_tx(txinfo, amount, currency, to_address)
             exporter.ingest_row(row)
         elif wallet_address == to_address:
             row = make_transfer_in_tx(txinfo, amount, currency)
@@ -68,40 +70,39 @@ def handle_multi_transfer(exporter, elem, txinfo):
             exporter.ingest_row(row)
 
 
-def handle_transfer_contract(exporter, elem, txinfo):
+def handle_transfer_contract(exporter, elem, txinfo, index):
     txid = txinfo.txid
     wallet_address = txinfo.wallet_address
-    execute_msgs = util_terra._execute_msgs(elem)
+    execute_msg = util_terra._execute_msg(elem, index)
 
-    for i, execute_msg in enumerate(execute_msgs):
-        recipient = execute_msg["transfer"].get("recipient", None)
-        if recipient:
-            # Extract currency
-            msg_value = elem["tx"]["value"]["msg"][i]["value"]
-            contract = msg_value.get("contract")
-            sender = msg_value.get("sender")
-            currency = util_terra._lookup_address(contract, txid)
+    recipient = execute_msg["transfer"].get("recipient", None)
+    if recipient:
+        # Extract currency
+        msg_value = elem["tx"]["value"]["msg"][index]["value"]
+        contract = msg_value.get("contract")
+        sender = msg_value.get("sender")
+        currency = util_terra._lookup_address(contract, txid)
 
-            # Extract amount
-            amount = util_terra._float_amount(execute_msg["transfer"]["amount"], currency)
+        # Extract amount
+        amount = util_terra._float_amount(execute_msg["transfer"]["amount"], currency)
 
-            if sender == wallet_address:
-                row = make_transfer_out_tx(txinfo, amount, currency, recipient)
-                exporter.ingest_row(row)
-            elif recipient == wallet_address:
-                row = make_transfer_in_tx(txinfo, amount, currency)
-                exporter.ingest_row(row)
-        else:
-            handle_unknown(exporter, txinfo)
-            ErrorCounter.increment("unknown_transfer_contract", txid)
+        if sender == wallet_address:
+            row = make_transfer_out_tx(txinfo, amount, currency, recipient)
+            exporter.ingest_row(row)
+        elif recipient == wallet_address:
+            row = make_transfer_in_tx(txinfo, amount, currency)
+            exporter.ingest_row(row)
+    else:
+        handle_unknown(exporter, txinfo)
+        ErrorCounter.increment("unknown_transfer_contract", txid)
 
 
-def handle_transfer_bridge_wormhole(exporter, elem, txinfo):
+def handle_transfer_bridge_wormhole(exporter, elem, txinfo, index):
     wallet_address = txinfo.wallet_address
     txid = txinfo.txid
     COMMENT = "bridge wormhole"
 
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid)
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index)
 
     if len(transfers_out) == 1 and len(transfers_in) == 0:
         sent_amount, sent_currency = transfers_out[0]
@@ -114,13 +115,13 @@ def handle_transfer_bridge_wormhole(exporter, elem, txinfo):
         row.comment = COMMENT
         exporter.ingest_row(row)
     else:
-        handle_unknown_detect_transfers(exporter, txinfo, elem)
+        handle_unknown_detect_transfers(exporter, txinfo, elem, index)
 
 
-def handle_ibc_transfer(exporter, elem, txinfo):
+def handle_ibc_transfer(exporter, elem, txinfo, index):
     wallet_address = txinfo.wallet_address
     txid = txinfo.txid
-    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid)
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
     COMMENT = "ibc bridge"
 
     if len(transfers_out) == 1 and len(transfers_in) == 0:
@@ -133,5 +134,5 @@ def handle_ibc_transfer(exporter, elem, txinfo):
         row = make_transfer_in_tx(txinfo, received_amount, received_currency)
         row.comment = COMMENT
         exporter.ingest_row(row)
-    else:
-        handle_unknown_detect_transfers(exporter, txinfo, elem)
+    # else:
+    #     handle_unknown_detect_transfers(exporter, txinfo, elem, index)

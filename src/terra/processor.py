@@ -1,6 +1,8 @@
 import logging
 import importlib
 from datetime import datetime
+from dateutil import tz
+import pytz
 
 import terra.execute_type as ex
 from common.ErrorCounter import ErrorCounter
@@ -22,6 +24,7 @@ import terra.col4.handle
 import terra.col5.handle
 
 from terra.data import named_address
+import common.Exporter as exp
 
 
 # execute_type -> tx_type mapping for generic transactions with no tax details
@@ -43,6 +46,7 @@ def process_tx(wallet_address, elem, exporter):
     txid = elem["txhash"]
     print(txid)
     txinfo = _txinfo(exporter, elem, wallet_address)
+    print(f"---- {txinfo.timestamp}")
 
     # Failed transaction
     if "code" in elem:
@@ -53,7 +57,6 @@ def process_tx(wallet_address, elem, exporter):
     # so if processed multiple times it would duplicate transactions
     msgtype = elem["tx"]["value"]["msg"][0]["type"]
 
-    skip = []
     index = -1
     for msg in elem["tx"]["value"]["msg"]:
         index += 1
@@ -61,123 +64,136 @@ def process_tx(wallet_address, elem, exporter):
         # filter parts of tranaction
         msgtype = msg["type"]
 
-        if msgtype in skip:
+        # multi send goes through all logs
+        # so it will be executed only once
+        if msgtype == "ibc/MsgAcknowledgement":
             continue
 
         if msgtype == "bank/MsgMultiSend":
-            skip.append(msgtype)
             handle_multi_transfer(exporter, elem, txinfo)
-            continue
+            return
+
         if msgtype == "cosmos-sdk/MsgTransfer":
-            skip.append(msgtype)
-            handle_ibc_transfer(exporter, elem, txinfo)
+            handle_ibc_transfer(exporter, elem, txinfo, index)
             continue
         if msgtype == "ibc/MsgUpdateClient":
-            skip.append(msgtype)
-            handle_ibc_transfer(exporter, elem, txinfo)
+            handle_ibc_transfer(exporter, elem, txinfo, index)
             continue
-        if msgtype == "market/MsgSwap":
-            handle_swap_msgswap(exporter, elem, txinfo)
-            skip.append(msgtype)
+        if msgtype == "ibc/MsgRecvPacket":
+            handle_ibc_transfer(exporter, elem, txinfo, index)
             continue
+        # LUNA staking reward
         if msgtype in ["staking/MsgDelegate", "distribution/MsgWithdrawDelegationReward",
                         "staking/MsgBeginRedelegate", "staking/MsgUndelegate"]:
-            skip.append(msgtype)
-            # LUNA staking reward
-            handle_reward(exporter, elem, txinfo, msgtype)
+            handle_reward(exporter, elem, txinfo, msgtype, index)
             continue
 
-        try:
-            if msgtype == "bank/MsgSend":
-                handle_transfer(exporter, elem, txinfo, index)
+        if msgtype == "market/MsgSwap":
+            handle_swap_msgswap(exporter, elem, txinfo, index)
+            continue
+        if msgtype == "bank/MsgSend":
+            handle_transfer(exporter, elem, txinfo, index)
+            continue
+        if msgtype in ["gov/MsgVote", "gov/MsgDeposit", "gov/MsgSubmitProposal"]:
+            handle_simple(exporter, txinfo, TX_TYPE_GOV, index)
+            continue
+
+        # try:
+
+        if msgtype == "wasm/MsgExecuteContract":
+            # upstream contracts handling
+            if terra.col5.handle.can_handle(exporter, elem, txinfo):
+                # THIS SHOULD BE FIRST CHOICE TO ADD NEW HANDLERS
+                terra.col5.handle.handle(exporter, elem, txinfo)
+                logging.debug("Used col5 handler")
+                return
+        
+            # general info
+            contract = msg["value"]["contract"]
+            # decode message
+            execute_msg = util_terra._execute_msg(elem, index)
+            msg["value"]["execute_msg"] = execute_msg
+
+            # ignore list
+            # maybe add later on generlized
+            # nft collection whitelistings...
+            if "add_to_list" in execute_msg:
+                return
+
+            # skip increase allowance
+            if "increase_allowance" in execute_msg:
                 continue
-            if msgtype in ["gov/MsgVote", "gov/MsgDeposit", "gov/MsgSubmitProposal"]:
-                handle_simple(exporter, txinfo, TX_TYPE_GOV, index)
-                continue
 
-            if msgtype == "wasm/MsgExecuteContract":
-                # upstream contracts handling
-                if terra.col5.handle.can_handle(exporter, elem, txinfo):
-                    # THIS SHOULD BE FIRST CHOICE TO ADD NEW HANDLERS
-                    terra.col5.handle.handle(exporter, elem, txinfo)
-                    logging.debug("Used col5 handler")
-                    return
-            
-                # general info
-                contract = msg["value"]["contract"]
-                # decode message
-                execute_msg = util_terra._execute_msg(elem, index)
-                msg["value"]["execute_msg"] = execute_msg
+            # send specific currency to other contract
+            if "send" in execute_msg and "contract" in execute_msg["send"]:
+                contract = execute_msg["send"]["contract"]
 
-                # skip increase allowance
-                if "increase_allowance" in execute_msg:
-                    continue
 
-                # send specific currency to other contract
-                if "send" in execute_msg and "contract" in execute_msg["send"]:
-                    contract = execute_msg["send"]["contract"]
-    
-                name = named_address(contract)
-                if name != "":
-                    txinfo.comment += f" contract {name}"
-
-                # Handle contracts
-                execute_type = None
-                info = contract_info(contract)
-                # print("!!!!!!!!!!!!!!")
-                # print(contract)
-                # print(info)
-                if info is not None:
-                    protocol = info['protocol'].lower()
-                    try:
-                        # try to load protocol
-                        c = importlib.import_module(f"terra.contracts.{protocol}")
-
-                        # Custom handle transaction
-                        execute_type = c.handle(exporter, elem, txinfo, index)
-
-                        # If no execute type is returned there nothing to do anymore
-                        if execute_type is None:
-                            continue
-                        if execute_type is False:
-                            break
-
-                    except ModuleNotFoundError:
-                        logging.warn("Not supported protocol %s ...", protocol)
-                        print(info)
-                elif contract in unspecific.CONTRACTS:
-                    execute_type = unspecific.handle(exporter, elem, txinfo, index)
-                else:
-                    logging.warn("Unknown protocol contract=%s txid=%s", contract, txid)
-                    execute_type = ex._execute_type(elem, txinfo)
-
-                # First check if we could figure out the process type
-                if execute_type == ex.EXECUTE_TYPE_UNKNOWN:
-                    logging.error("Exception when handling contract=%s txid=%s", contract, txid)
-                    ErrorCounter.increment("exception", txid)
-                    handle_unknown(exporter, txinfo)
-                    return
-                
-                # Legacy handlers
+            # Handle contracts
+            execute_type = None
+            info = contract_info(contract)
+            print("!!!!!!!!!!!!!!")
+            print(contract)
+            print(info)
+            if info is not None:
+                protocol = info['protocol'].lower().replace(" ", "_")
                 try:
-                    terra.col4.handle.handle(exporter, elem, txinfo)
-                    logging.debug("Used col4 handler")
-                except Exception as e:
-                    logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
-                    ErrorCounter.increment("exception", txid)
-                    handle_unknown(exporter, txinfo)
+                    # try to load protocol
+                    c = importlib.import_module(f"terra.contracts.{protocol}")
+
+                    # Custom handle transaction
+                    exp.COMMENT_PROTOCOL = f"{info['protocol']} - {info['name']}"
+                    execute_type = c.handle(exporter, elem, txinfo, index)
+                    exp.COMMENT_PROTOCOL = ""
+
+                    # If no execute type is returned there nothing to do anymore
+                    if execute_type is None:
+                        continue
+                    if execute_type is False:
+                        break
+
+                except ModuleNotFoundError:
+                    logging.warn("Not supported protocol %s ...", protocol)
+                    print(info)
+            elif contract in unspecific.CONTRACTS:
+                execute_type = unspecific.handle(exporter, elem, txinfo, index)
+                return
             else:
-                logging.error("Unknown msgtype for txid=%s msgtype=%s", txid, msgtype)
-                ErrorCounter.increment("unknown_msgtype", txid)
-                handle_unknown_detect_transfers(exporter, txinfo, elem)
+                logging.warn("Unknown protocol contract=%s txid=%s", contract, txid)
+                execute_type = ex._execute_type(elem, txinfo)
+                quit()
 
-        except NameError as e: # Exception 
-            logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
-            ErrorCounter.increment("exception", txid)
-            handle_unknown(exporter, txinfo)
+            # First check if we could figure out the process type
+            if execute_type == ex.EXECUTE_TYPE_UNKNOWN:
+                logging.error("Exception when handling contract=%s txid=%s", contract, txid)
+                ErrorCounter.increment("exception", txid)
+                handle_unknown(exporter, txinfo)
+                return
+            
+            # Legacy handlers
+            try:
+                c = terra.col4.handle.handle_once(exporter, elem, txinfo, index)
+                logging.debug("Used col4 handler")
+                if c is False:
+                    return
+                else:
+                    continue
+            except NameError as e:
+                logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
+                ErrorCounter.increment("exception", txid)
+                handle_unknown(exporter, txinfo)
+        else:
+            logging.error("Unknown msgtype for txid=%s msgtype=%s", txid, msgtype)
+            ErrorCounter.increment("unknown_msgtype", txid)
+            handle_unknown_detect_transfers(exporter, txinfo, elem, index)
 
-            if localconfig.debug:
-                raise (e)
+        # except NameError as e: # Exception 
+        #     logging.error("Exception when handling txid=%s, exception=%s", txid, str(e))
+        #     ErrorCounter.increment("exception", txid)
+        #     handle_unknown(exporter, txinfo)
+
+        #     if localconfig.debug:
+        #         raise (e)
     
 
     return txinfo
@@ -185,7 +201,7 @@ def process_tx(wallet_address, elem, exporter):
 
 def _txinfo(exporter, elem, wallet_address):
     txid = elem["txhash"]
-    timestamp = datetime.strptime(elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.strptime(elem["timestamp"], "%Y-%m-%dT%H:%M:%SZ").astimezone(tz = pytz.timezone('Europe/Berlin')).strftime("%Y-%m-%d %H:%M:%S")
     fee, fee_currency, more_fees = _get_fee(elem)
     msgs = _msgs(elem, wallet_address)
     txinfo = TxInfoTerra(txid, timestamp, fee, fee_currency, wallet_address, msgs)

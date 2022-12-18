@@ -43,10 +43,14 @@ CONTRACTS_MIRROR = [
     "terra1zpr8tq3ts96mthcdkukmqq4y9lhw0ycevsnw89"  # limit order
 ]
 
+SPECIAL_CURRENCY = {
+    "terra1zsaswh926ey8qa5x4vj93kzzlfnef0pstuca0y": "bPsiDP-24m",
+}
+
 CONTRACT_RANDOMEARTH = "terra1eek0ymmhyzja60830xhzm7k7jkrk99a60q2z2t"
 
 CHAIN_ID = "columbus-5"
-EXCHANGE_TERRA_BLOCKCHAIN = "terra_blockchain"
+EXCHANGE_TERRA_BLOCKCHAIN = "Terra Wallet (DeFi) - 2022"
 EXCHANGE_ANCHOR_EARN = "anchor_earn"
 
 CUR_ANC = "ANC"

@@ -6,6 +6,8 @@ from common.ExporterTypes import (
     TX_TYPE_LP_DEPOSIT,
     TX_TYPE_LP_STAKE,
     TX_TYPE_LP_UNSTAKE,
+    TX_TYPE_STAKE,
+    TX_TYPE_UNSTAKE,
     TX_TYPE_LP_WITHDRAW,
     TX_TYPE_NFT_DEPOSIT,
     TX_TYPE_NFT_MINT,
@@ -75,6 +77,12 @@ def make_lp_stake_tx(txinfo, lp_amount, lp_currency, empty_fee=False, z_index=0)
 def make_lp_unstake_tx(txinfo, lp_amount, lp_currency):
     return _make_tx_received(txinfo, lp_amount, lp_currency, TX_TYPE_LP_UNSTAKE)
 
+def make_stake_tx(txinfo, lp_amount, lp_currency, empty_fee=False, z_index=0):
+    return _make_tx_sent(txinfo, lp_amount, lp_currency, TX_TYPE_STAKE, empty_fee=empty_fee, z_index=z_index)
+
+
+def make_unstake_tx(txinfo, lp_amount, lp_currency):
+    return _make_tx_received(txinfo, lp_amount, lp_currency, TX_TYPE_UNSTAKE)
 
 def make_deposit_collateral_tx(txinfo, sent_amount, sent_currency, z_index=0):
     return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_DEPOSIT_COLLATERAL, z_index=z_index)
@@ -103,8 +111,8 @@ def make_submit_limit_order(txinfo, ask_amount, ask_currency, offer_asset, offer
     row.comment = "Submitting limit order. Asking {} {} and offering {} {}".format(ask_amount, ask_currency, offer_asset, offer_currency)
     return row
 
-def make_gov_stake_tx(txinfo, sent_amount, sent_currency):
-    return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_GOV_STAKE)
+def make_gov_stake_tx(txinfo, sent_amount, sent_currency, empty_fee=False):
+    return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_GOV_STAKE, empty_fee)
 
 
 def make_burn_collateral_tx(txinfo, sent_amount, sent_currency):
@@ -123,8 +131,8 @@ def make_nft_reserve_tx(txinfo, sent_amount, sent_currency, name=""):
     return row
 
 
-def make_nft_mint_no_purchase_tx(txinfo, nft_currency, name=""):
-    row = _make_tx_received(txinfo, 1, nft_currency, TX_TYPE_NFT_MINT)
+def make_nft_mint_no_purchase_tx(txinfo, nft_currency, name="", empty_fee=False):
+    row = _make_tx_received(txinfo, 1, nft_currency, TX_TYPE_NFT_MINT, empty_fee=empty_fee)
     row.comment = _mint_comment(name)
     return row
 
@@ -170,6 +178,11 @@ def make_nft_offer_deposit(txinfo, sent_amount, sent_currency):
     row.comment = "deposit currency for nft offer"
     return row
 
+
+def make_nft_offer_refund(txinfo, receive_amount, received_currency):
+    row = _make_tx_received(txinfo, receive_amount, received_currency, TX_TYPE_NFT_DEPOSIT, empty_fee=True)
+    row.comment = "refund currency for nft offer"
+    return row
 
 def make_nft_withdraw(txinfo, received_amount, received_currency):
     row = _make_tx_received(txinfo, received_amount, received_currency, TX_TYPE_NFT_WITHDRAW)

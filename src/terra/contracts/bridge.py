@@ -7,3 +7,4 @@ CONTRACTS = [
 def handle(exporter, elem, txinfo, contract):
     print('TERRA BRIDGE!')
     #print(elem)
+    return True

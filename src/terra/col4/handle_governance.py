@@ -27,10 +27,10 @@ def handle_governance_unstake(exporter, elem, txinfo, index=0):
         exporter.ingest_row(row)
 
 
-def handle_governance_reward(exporter, elem, txinfo):
+def handle_governance_reward(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
 
-    amount, currency = _extract_amount(elem, txid, "transfer")
+    amount, currency = _extract_amount(elem, txid, "transfer", index)
     if amount and currency:
         row = make_reward_tx(txinfo, amount, currency)
         exporter.ingest_row(row)

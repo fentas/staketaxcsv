@@ -107,7 +107,7 @@ def run_exports(ticker, wallet_address, exporter, export_format):
     exporter.sort_rows()
 
     # Print transactions table to console
-    exporter.export_print()
+    # exporter.export_print()
 
     # Get list of CSVs to write
     formats_list = FORMATS if export_format == ALL else [export_format]

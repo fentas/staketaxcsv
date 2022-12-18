@@ -8,11 +8,30 @@
             "Fees"
         ]
     },
+    "terra1yqg0wzvkjn7c83ra83ksthwu6vd927kssrhwhn": {
+        "protocol": "Coinhall",
+        "name": "Fee account (2)",
+        "id": "COINHALL_FEES",
+        "fees": true,
+        "tags": [
+            "Fees"
+        ]
+    },
     "terra17hk7d34mg77w6ujcr6n58p8hjl9ez8w9gj6auk": {
         "protocol": "TerraLand",
         "name": "Fee account",
         "icon": "https://terralandio-site.s3.eu-central-1.amazonaws.com/TerraLand-logo-v1c-4x.png",
         "id": "TERRALAND_FEES",
+        "fees": true,
+        "tags": [
+            "Fees"
+        ]
+    },
+    "terra17z2fmjz7268ewrd2y92thl5wgnfqun3vyyu39y": {
+        "protocol": "Kujira",
+        "name": "Fee account",
+        "icon": "https://finder.extraterrestrial.money/images/SVG/KUJI.svg",
+        "id": "KUJIRA_FEES",
         "fees": true,
         "tags": [
             "Fees"

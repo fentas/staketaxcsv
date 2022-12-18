@@ -6,9 +6,18 @@ import pandas as pd
 import pytz
 from pytz import timezone
 from tabulate import tabulate
+import hashlib
+
+from terra.coinhall import Coinhall
 
 from common import ExporterTypes as et
 from common.exporter_koinly import NullMap
+
+# this is a pointer to the module object instance itself.
+import sys
+_this = sys.modules[__name__]
+# we can explicitly make assignments on it 
+_this.COMMENT_PROTOCOL = ""
 
 
 class Row:
@@ -93,7 +102,11 @@ class Exporter:
                 self.lp_treatment = localconfig.lp_treatment
             self.use_cache = localconfig.cache
 
+        self.coinhall = Coinhall()
+
     def ingest_row(self, row):
+        if _this.COMMENT_PROTOCOL != "":
+            row.comment += " <" + _this.COMMENT_PROTOCOL + ">"
         self.rows.append(row)
 
     def ingest_csv(self, default_csv):
@@ -127,6 +140,7 @@ class Exporter:
 
     def _rows_export(self, format):
         self.sort_rows(reverse=True)
+        return self.rows
         rows = filter(lambda row: row.tx_type in et.TX_TYPES_CSVEXPORT, self.rows)
 
         if format in [et.FORMAT_KOINLY, et.FORMAT_COINPANDA]:
@@ -303,6 +317,8 @@ class Exporter:
             et.TX_TYPE_FEE: "Other Fee",
             et.TX_TYPE_FEE_SETTLEMENT: "Settlement Fee",
             et.TX_TYPE_FEE_BORROWING: "Borrowing Fee",
+            et.TX_TYPE_LP_DEPOSIT: "Trade",
+            et.TX_TYPE_LP_WITHDRAW: "Trade",
         }
         rows = self._rows_export(et.FORMAT_COINTRACKING)
 
@@ -314,6 +330,19 @@ class Exporter:
 
             # data rows
             for row in rows:
+                if row.tx_type not in cointracking_types:
+                    if row.fee != "":
+                        row.tx_type = et.TX_TYPE_FEE
+                        row.received_amount = ""
+                        row.received_currency = ""
+                        row.sent_amount = row.fee
+                        row.sent_currency = row.fee_currency
+                        row.fee = ""
+                        row.fee_currency = ""
+                        row.comment += " **fee** "
+                    else:
+                        continue
+
                 # Determine type
                 ct_type = cointracking_types[row.tx_type]
                 if ct_type == et.TX_TYPE_TRANSFER:
@@ -331,10 +360,13 @@ class Exporter:
 
                 # add txid to comment, as helpful info in cointracking UI
                 if row.comment:
-                    comment = "{} {}".format(row.comment, row.txid)
+                    comment = "{} [{}]".format(row.comment, row.txid)
                 else:
                     comment = row.txid
 
+                row.received_currency = row.received_currency.upper()
+                row.sent_currency = row.sent_currency.upper()
+                row.fee_currency = row.fee_currency.upper()
                 # Adjust amount(s) for fee according to cointracking spec
                 # https://cointracking.freshdesk.com/en/support/solutions/articles/29000007202-entering-fees
                 adj_sent_amount, adj_received_amount, other_fee_line = self._cointracking_fee_adjustments(ct_type, row, comment)
@@ -351,7 +383,9 @@ class Exporter:
                     row.wallet_address,                                  # Trade-Group
                     comment,                                             # Comment
                     row.timestamp,                                       # Date
-                    txid_cointracking                                    # Tx-ID
+                    txid_cointracking,                                   # Tx-ID
+                    self._buy_value(row),
+                    self._sell_value(row),
                 ]
                 mywriter.writerow(line)
 
@@ -359,6 +393,48 @@ class Exporter:
                     mywriter.writerow(other_fee_line)
 
         logging.info("Wrote to %s", csvpath)
+
+    def _buy_value(self, row):
+        currency = row.received_currency
+        amount = row.received_amount
+
+        if row.sent_currency == 'UST':
+            return row.sent_amount
+
+        if currency.startswith("LP_"):
+            if row.sent_currency == 'UST':
+                return row.sent_amount
+            else:
+                currency = row.sent_currency
+                amount = row.sent_amount
+
+        data = self.coinhall.price(currency, row.timestamp)
+        if data == None:
+            return ""
+
+        # just take middle
+        return (data["open"] + data["close"]) / 2
+
+    def _sell_value(self, row):
+        currency = row.sent_currency
+        amount = row.sent_amount
+
+        if row.received_currency == 'UST':
+            return row.received_currency    
+
+        if currency.startswith("LP_"):
+            if row.received_currency == 'UST':
+                return row.received_amount
+            else:
+                currency = row.received_currency
+                amount = row.received_amount
+
+        data = self.coinhall.price(currency, row.timestamp)
+        if data == None:
+            return ""
+
+        # just take middle
+        return (data["open"] + data["close"]) / 2
 
     def _cointracking_fee_adjustments(self, ct_type, row, comment):
         if not row.fee:
@@ -388,7 +464,9 @@ class Exporter:
                 row.wallet_address,                            # Trade-Group
                 "fee for {}".format(row.txid),                 # Comment
                 row.timestamp,                                 # Date
-                txid_other_fee                                 # Tx-ID
+                txid_other_fee,                                # Tx-ID
+                "",
+                "",
             ]
             return row.sent_amount, row.received_amount, other_fee_line
         else:
@@ -1187,6 +1265,11 @@ class Exporter:
         return local_dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _cointracking_code(self, currency):
+        if currency == "":
+            return ""
+
+        currency = currency.upper()
+        
         # Reference: https://cointracking.info/coin_charts.php
         remap = {
             "ANC": "ANC2",
@@ -1209,6 +1292,9 @@ class Exporter:
             "TWD": "TWD2",
             "WHALE": "WHALE3",
             "WTUST": "UST3",
+            "MARS": "MARS6",
+            "METH": "METH2",
+            "bPsiDP-24m": "bPsiDP",
             # Terra: stablecoins to currency to track correct value
             "SGT": "SGD",
             "SET": "SEK",
@@ -1217,8 +1303,21 @@ class Exporter:
             "CAT": "CAD",
             "MNT": "MNT2"
         }
-        if currency and currency.upper() in remap:
+        if currency in remap:
             return remap[currency.upper()]
+
+        # cointracking can't handle more then 8 chars
+        if currency.startswith('LP_'):
+            return ''.join([part[:4] for part in currency[3:].split('_')])
+
+        if len(currency) > 8:
+            # nft 'currency' names are way longer then 8
+            # revese string as every nft cur begins with terra...
+            # hash = hashlib.sha1(currency.encode("UTF-8")).hexdigest()
+            # return hash[:8]
+            hash = hashlib.md5(currency[::-1].encode()).hexdigest()
+            return hash[:8]
+
         return currency
 
     def _cointracker_code(self, currency):

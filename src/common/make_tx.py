@@ -14,9 +14,15 @@ from common.ExporterTypes import (
     TX_TYPE_FEE_SETTLEMENT,
     TX_TYPE_LP_DEPOSIT,
     TX_TYPE_LP_WITHDRAW,
+    TX_TYPE_FEE_BORROWING,
 )
 from settings_csv import DONATION_WALLETS
 
+from terra.data import contract_info
+from terra.util_terra import _convert
+
+# just a workaround to make sure that only one time fees are applied
+_TX_FEE = {}
 
 def make_swap_tx(txinfo, sent_amount, sent_currency, received_amount, received_currency,
                  txid=None, empty_fee=False):
@@ -41,15 +47,24 @@ def make_spend_tx(txinfo, sent_amount, sent_currency):
     return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_SPEND)
 
 
-def make_just_fee_tx(txinfo, fee_amount, fee_currency, tx_type=TX_TYPE_FEE):
-    return _make_tx_sent(txinfo, fee_amount, fee_currency, tx_type, empty_fee=True)
+def make_just_fee_tx(txinfo, fee_amount, fee_currency, tx_type=TX_TYPE_FEE, empty_fee=True):
+    return _make_tx_sent(txinfo, fee_amount, fee_currency, tx_type, empty_fee=empty_fee)
+
+def make_just_fee_txinfo(txinfo, tx_type=TX_TYPE_FEE, empty_fee=True):
+    fee_amount, fee_currency = _convert(txinfo.fee, txinfo.fee_currency)
+    return _make_tx_sent(txinfo, fee_amount, fee_currency, tx_type, empty_fee=empty_fee)
 
 
 def make_transfer_out_tx(txinfo, sent_amount, sent_currency, dest_address=None):
     if dest_address and dest_address in DONATION_WALLETS:
         return make_spend_tx(txinfo, sent_amount, sent_currency)
     else:
-        return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_TRANSFER)
+        info = contract_info(dest_address)
+        if info is not None and 'fees' in info:
+            txinfo.comment += " - fees for " + info['protocol']
+            return make_just_fee_tx(txinfo, sent_amount, sent_currency)
+        else:
+            return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_TRANSFER)
 
 
 def make_transfer_in_tx(txinfo, received_amount, received_currency):
@@ -76,9 +91,12 @@ def make_borrow_tx(txinfo, received_amount, received_currency, empty_fee=False, 
 
 
 def make_repay_tx(txinfo, sent_amount, sent_currency, z_index=0):
-    txinfo.comment = "repay " + txinfo.comment
+    txinfo.comment = "*repay " + txinfo.comment
     return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_REPAY, z_index=z_index)
 
+def make_repay_borrow_fee_tx(txinfo, sent_amount, sent_currency, z_index=0):
+    txinfo.comment = "*borrow fee " + txinfo.comment
+    return _make_tx_sent(txinfo, sent_amount, sent_currency, TX_TYPE_FEE_BORROWING, z_index=z_index)
 
 def make_simple_tx(txinfo, tx_type, z_index=0):
     fee_currency = txinfo.fee_currency if txinfo.fee else ""
@@ -116,7 +134,13 @@ def make_unknown_tx_with_transfer(txinfo, sent_amount, sent_currency, received_a
 
 def _make_tx_received(txinfo, received_amount, received_currency, tx_type, txid=None, empty_fee=False, z_index=0):
     txid = txid if txid else txinfo.txid
-    fee = "" if empty_fee else txinfo.fee
+
+    if txid in _TX_FEE or empty_fee:
+        fee = ""
+    else:
+        fee = txinfo.fee
+        _TX_FEE[txid] = txinfo
+
     fee_currency = txinfo.fee_currency if fee else ""
 
     row = Row(
@@ -139,7 +163,14 @@ def _make_tx_received(txinfo, received_amount, received_currency, tx_type, txid=
 
 
 def _make_tx_sent(txinfo, sent_amount, sent_currency, tx_type, empty_fee=False, z_index=0):
-    fee = "" if empty_fee else txinfo.fee
+    txid = txinfo.txid
+
+    if txid in _TX_FEE or empty_fee:
+        fee = ""
+    else:
+        fee = txinfo.fee
+        _TX_FEE[txid] = txinfo
+
     fee_currency = txinfo.fee_currency if fee else ""
 
     row = Row(
@@ -164,7 +195,13 @@ def _make_tx_sent(txinfo, sent_amount, sent_currency, tx_type, empty_fee=False, 
 def _make_tx_exchange(txinfo, sent_amount, sent_currency, received_amount, received_currency, tx_type,
                       txid=None, empty_fee=False, z_index=0):
     txid = txid if txid else txinfo.txid
-    fee = "" if empty_fee else txinfo.fee
+
+    if txid in _TX_FEE or empty_fee:
+        fee = ""
+    else:
+        fee = txinfo.fee
+        _TX_FEE[txid] = txinfo
+
     fee_currency = txinfo.fee_currency if fee else ""
 
     row = Row(

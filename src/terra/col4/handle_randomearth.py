@@ -1,5 +1,5 @@
 from common.ErrorCounter import ErrorCounter
-from common.ExporterTypes import TX_TYPE_NFT_WHITELIST, TX_TYPE_NFT_CANCEL_ORDER
+from common.ExporterTypes import TX_TYPE_NFT_WHITELIST, TX_TYPE_NFT_CANCEL_ORDER, TX_TYPE_NFT_REVOKE_ORDER
 from terra import util_terra
 from terra.api_lcd import LcdAPI
 from terra.col4.handle_simple import handle_simple, handle_unknown
@@ -129,7 +129,8 @@ def handle_mint_nft(exporter, elem, txinfo):
             nft_currency = "{}_{}".format(contract, token_id)
             name = _nft_name(contract)
 
-            row = make_nft_mint_no_purchase_tx(txinfo, nft_currency, name)
+            empty_fee = elem["tx"]["value"]["msg"][i]["value"]["sender"] != wallet_address
+            row = make_nft_mint_no_purchase_tx(txinfo, nft_currency, name, empty_fee)
             exporter.ingest_row(row)
             inserted_row = True
 
@@ -351,3 +352,8 @@ def handle_withdraw(exporter, elem, txinfo, index=0):
 def handle_cancel_order(exporter, elem, txinfo, index=0):
     """ cancel offer from randomearth.io """
     handle_simple(exporter, txinfo, TX_TYPE_NFT_CANCEL_ORDER)
+
+
+def handle_revoke_order(exporter, elem, txinfo, index=0):
+    """ cancel offer from randomearth.io """
+    handle_simple(exporter, txinfo, TX_TYPE_NFT_REVOKE_ORDER)

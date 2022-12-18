@@ -8,9 +8,14 @@ from terra.col4.handle_transfer import handle_transfer
 from terra.col4 import (
     handle_reward_pylon,
 )
-from common.make_tx import make_transfer_in_tx, make_transfer_out_tx
+from common.make_tx import make_transfer_in_tx, make_transfer_out_tx,  make_reward_tx
 
-from terra.make_tx import make_swap_tx_terra, make_lockup_tx, make_swap_tx_terra
+from terra.make_tx import (
+    make_swap_tx_terra,
+    make_lockup_tx,
+    make_swap_tx_terra,
+    make_unstake_tx,
+)
 
 # known contracts from protocol
 CONTRACTS = [
@@ -44,14 +49,18 @@ def handle(exporter, elem, txinfo, index):
 
     # ignore whitelist (for swaps) requests
     if "configure" in execute_msg and "whitelist" in execute_msg["configure"]:
-        return
+        return False
 
     if "airdrop" in execute_msg:
+        if "allocate" in execute_msg["airdrop"]:
+            # Just bulk register for airdrop
+            return False
+
         handle_reward_pylon.handle_airdrop_pylon(exporter, elem, txinfo)
         return False
 
     if "withdraw" in execute_msg:
-        return handle_governance_unstake(exporter, elem, txinfo, index)
+        return handle_withdraw(exporter, elem, txinfo, index) # handle_governance_unstake(exporter, elem, txinfo, index)
 
     if "unbond" in execute_msg:
         return handle_lp_unstake(exporter, elem, txinfo, index)
@@ -64,6 +73,9 @@ def handle(exporter, elem, txinfo, index):
     if "refund" in execute_msg:
         return handle_pylon_refund(exporter, elem, txinfo, index)
 
+    if "claim" in execute_msg:
+        return handle_claim(exporter, elem, txinfo, index)
+
     if "send" in execute_msg:
         msg = execute_msg["send"]["msg"]
 
@@ -72,7 +84,7 @@ def handle(exporter, elem, txinfo, index):
             return handle_governance_stake(exporter, elem, txinfo, index)
         
         if "stake" in msg:
-            return True
+            return handle_governance_stake(exporter, elem, txinfo, index)
 
         # Bond transactions
         if "bond" in msg:
@@ -81,12 +93,14 @@ def handle(exporter, elem, txinfo, index):
         # put in UST in pool (two of two) PoolLP -> Stake
         if "deposit" in msg:
             return handle_pylon_lockup(exporter, elem, txinfo, index)
+
+        if "redeem" in msg:
+            return handle_redeem(exporter, elem, txinfo, index)
+
         
     if "poll" in execute_msg:
         return True
     if "cast_vote" in execute_msg:
-        return True
-    if "claim" in execute_msg:
         return True
     if "withdraw_voting_tokens" in execute_msg:
         return True
@@ -94,6 +108,46 @@ def handle(exporter, elem, txinfo, index):
     # Try generall col4 transaction
     logging.warn("[pylon] General transaction txid=%s msg=%s", elem["txhash"], execute_msg)
     return True
+
+def handle_redeem(exporter, elem, txinfo, index):
+    txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
+
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1)
+    assert(len(transfers_out) == 1)
+
+    received_amount, received_currency = util_terra._convert(*transfers_in[0])
+    sent_amount, sent_currency = util_terra._convert(*transfers_out[0])
+
+    row = make_swap_tx_terra(txinfo, sent_amount, sent_currency, received_amount, received_currency, txid=txid)
+    exporter.ingest_row(row)
+
+def handle_withdraw(exporter, elem, txinfo, index):
+    txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
+
+    events = elem["logs"][index]["events_by_type"]["from_contract"]
+    transfers_in, _ = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1)
+
+    amount, currency = util_terra._convert(*transfers_in[0])
+
+    row = make_unstake_tx(txinfo, amount, currency)
+    exporter.ingest_row(row)
+
+def handle_claim(exporter, elem, txinfo, index):
+    txid = txinfo.txid
+    wallet_address = txinfo.wallet_address
+
+    events = elem["logs"][index]["events_by_type"]["from_contract"]
+    transfers_in, _ = util_terra._transfers(elem, wallet_address, txid, index=index)
+    assert(len(transfers_in) == 1)
+
+    amount, currency = util_terra._convert(*transfers_in[0])
+
+    row = make_reward_tx(txinfo, amount, currency, txid)
+    exporter.ingest_row(row)
 
 def handle_pylon_refund(exporter, elem, txinfo, index=0):
     """ Handles pylon refund """
@@ -114,9 +168,11 @@ def handle_pylon_deposit(exporter, elem, txinfo, index=0):
     txid = txinfo.txid
     log = elem["logs"][index]
 
+    transfers_in, transfers_out = util_terra._transfers(elem, wallet_address, txid, index=index)
     contract = log["events_by_type"]["from_contract"]["contract_address"][-1]
-    wallet_address = txinfo.wallet_address
-    _, [[sent_amount, sent_currency]] = util_terra._transfers_log(log, wallet_address)
+
+    assert(len(transfers_out) == 1)
+    sent_amount, sent_currency = util_terra._convert(*transfers_out[0])
 
     # PSI Swap
     if contract == CONTRACTS[4]:
@@ -130,8 +186,9 @@ def handle_pylon_deposit(exporter, elem, txinfo, index=0):
         row = make_transfer_out_tx(txinfo, sent_amount, sent_currency, contract)
 
     else:
-        received_amount = log["events_by_type"]["from_contract"]["amount"][2]
-        received_currency = util_terra._asset_to_currency(contract, txid)
+        assert(len(transfers_in) == 1)
+        print(transfers_in)
+        received_amount, received_currency = util_terra._convert(*transfers_in[0])
         row = make_swap_tx_terra(txinfo, sent_amount, sent_currency, received_amount, received_currency)
 
     exporter.ingest_row(row)

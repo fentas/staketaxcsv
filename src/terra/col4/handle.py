@@ -44,12 +44,44 @@ EXECUTE_TYPES_SIMPLE = {
     ex.EXECUTE_TYPE_REGISTER: TX_TYPE_LOTA_UNKNOWN,
 }
 
+def handle_once(exporter, elem, txinfo, index):
+    txid = elem["txhash"]
+    contract = util_terra._contract(elem, index)
+    execute_type = ex._execute_type(elem, txinfo, index)
+
+    # General
+    if execute_type == ex.EXECUTE_TYPE_CLAIM:
+        return handle_reward_contract.handle_airdrop(exporter, elem, txinfo, index)
+    if execute_type == ex.EXECUTE_TYPE_TRANSFER:
+        # Currently handles transfer to/from shuttle bridge
+        return handle_transfer.handle_transfer_contract(exporter, elem, txinfo, index)
+
+    # Governance staking for ANC or MIR or VKR
+    if execute_type == ex.EXECUTE_TYPE_STAKE_VOTING_TOKENS:
+        return handle_governance.handle_governance_stake(exporter, elem, txinfo)
+    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_TOKENS:
+        return handle_governance.handle_governance_unstake(exporter, elem, txinfo)
+    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
+        return handle_governance.handle_governance_reward(exporter, elem, txinfo)
+
+    # LP's
+    if execute_type == ex.EXECUTE_TYPE_UNBOND:
+        return handle_lp.handle_lp_unstake(exporter, elem, txinfo, index)
+    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_LIQUIDITY:
+        return handle_lp.handle_lp_withdraw(exporter, elem, txinfo, index)
+    elif execute_type == ex.EXECUTE_TYPE_BOND_IN_MSG:
+        return handle_lp.handle_lp_stake(exporter, elem, txinfo, index)
+
+    handle(exporter, elem, txinfo)
+    return False
 
 def handle(exporter, elem, txinfo):
     txid = elem["txhash"]
     contract = util_terra._contract(elem, 0)
     execute_type = ex._execute_type(elem, txinfo)
 
+    print("==========")
+    print(execute_type)
     # ######### Handle by specific contract ###########################################
 
     # Handle dApp contracts as _{DAPP}_unknown
@@ -71,8 +103,8 @@ def handle(exporter, elem, txinfo):
             return handle_reward_pylon.handle_pylon_withdraw(exporter, elem, txinfo)
         else:
             return handle_unknown_detect_transfers(exporter, txinfo, elem)
-    elif contract == CONTRACT_RANDOMEARTH:
-        return handle_randomearth.handle_randomearth(exporter, elem, txinfo)
+    # elif contract == CONTRACT_RANDOMEARTH:
+    #     return handle_randomearth.handle_randomearth(exporter, elem, txinfo)
     elif util_terra._any_contracts(CONTRACTS_APOLLO, elem):
         return handle_reward_contract.handle_airdrop(exporter, elem, txinfo)
     elif util_terra._any_contracts(CONTRACTS_LOOP, elem):
@@ -88,11 +120,6 @@ def handle(exporter, elem, txinfo):
     elif execute_type in EXECUTE_TYPES_SIMPLE:
         tx_type = EXECUTE_TYPES_SIMPLE[execute_type]
         return handle_simple(exporter, txinfo, tx_type)
-    elif execute_type == ex.EXECUTE_TYPE_CLAIM:
-        return handle_reward_contract.handle_airdrop(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_TRANSFER:
-        # Currently handles transfer to/from shuttle bridge
-        return handle_transfer.handle_transfer_contract(exporter, elem, txinfo)
 
     # nft transactions
     elif execute_type in (ex.EXECUTE_TYPE_ADD_WHITELIST,
@@ -129,14 +156,6 @@ def handle(exporter, elem, txinfo):
         return handle_swap.handle_execute_swap_operations(exporter, elem, txinfo)
     elif execute_type == ex.EXECUTE_TYPE_ASSERT_LIMIT_ORDER:
         return handle_swap.handle_swap_msgswap(exporter, elem, txinfo)
-
-    # Governance staking for ANC or MIR or VKR
-    elif execute_type == ex.EXECUTE_TYPE_STAKE_VOTING_TOKENS:
-        return handle_governance.handle_governance_stake(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_TOKENS:
-        return handle_governance.handle_governance_unstake(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_VOTING_REWARDS:
-        return handle_governance.handle_governance_reward(exporter, elem, txinfo)
 
     # Anchor Borrow Transactions
     elif execute_type == ex.EXECUTE_TYPE_BORROW_STABLE:
@@ -179,14 +198,8 @@ def handle(exporter, elem, txinfo):
     # Mirror LP transactions
     elif execute_type == ex.EXECUTE_TYPE_PROVIDE_LIQUIDITY:
         return handle_lp.handle_lp_deposit(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_LIQUIDITY:
-        return handle_lp.handle_lp_withdraw(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_BOND_IN_MSG:
-        return handle_lp.handle_lp_stake(exporter, elem, txinfo)
     elif execute_type == ex.EXECUTE_TYPE_DEPOSIT_STRATEGY_ID_IN_MSG:
         return handle_lp.handle_lp_stake_deposit_strategy(exporter, elem, txinfo)
-    elif execute_type == ex.EXECUTE_TYPE_UNBOND:
-        return handle_lp.handle_lp_unstake(exporter, elem, txinfo)
     elif execute_type == ex.EXECUTE_TYPE_WITHDRAW_FROM_STRATEGY:
         return handle_lp.handle_lp_unstake_withdraw_from_strategy(exporter, elem, txinfo)
     elif execute_type == ex.EXECUTE_TYPE_AUTO_STAKE:
@@ -234,3 +247,4 @@ def handle(exporter, elem, txinfo):
         logging.error("Unknown execute_type for txid=%s", txid)
         ErrorCounter.increment("unknown_execute_type", txid)
         handle_unknown_detect_transfers(exporter, txinfo, elem)
+        quit()

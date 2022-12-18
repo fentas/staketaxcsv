@@ -4,6 +4,7 @@ import requests
 import json
 
 NAMED_ACCOUNTS_FILE = "src/terra/data/named_accounts.json"
+NAMED_ACCOUNTS_MANUALLY_FILE = "src/terra/data/named_accounts_manually.json"
 CONTRACTS_FILE = "src/terra/data/contracts.json"
 CONTRACTS_MAINNET_FILE = "src/terra/data/contracts_mainnet.json"
 ADDRESSES_FILE = "src/terra/data/addresses.json"
@@ -13,6 +14,8 @@ def _query_names(use_cache=True):
         if os.path.exists(NAMED_ACCOUNTS_FILE):
             with open(NAMED_ACCOUNTS_FILE, "r") as f:
                 data = json.load(f)
+            with open(NAMED_ACCOUNTS_MANUALLY_FILE, "r") as f:
+                data["mainnet"] = {**data["mainnet"], **json.load(f)}
             return data
 
     logging.info("Fetching all named accounts from extraterrestrial")
